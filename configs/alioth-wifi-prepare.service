@@ -1,0 +1,13 @@
+[Unit]
+Description=Alioth Wi-Fi firmware path preparation
+After=local-fs.target
+Before=alioth-qrtr-ns.service alioth-cnss-daemon.service alioth-wifi-bringup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/alioth-wifi-prepare
+RemainAfterExit=yes
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

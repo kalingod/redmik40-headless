@@ -1,0 +1,22 @@
+[Unit]
+Description=Alioth QCA Bluetooth firmware loader and HCI UART attach
+Documentation=file:/home/lele/桌面/project/redmik40/docs/boot-validation-log.md
+After=systemd-udevd.service bluetooth.service
+Wants=bluetooth.service
+ConditionPathExists=/usr/local/sbin/alioth_qca_uart_probe
+ConditionPathExists=/usr/local/sbin/alioth_hciattach_qca
+ConditionPathExists=/usr/local/sbin/alioth_bt_qca_init.sh
+ConditionPathExists=/lib/firmware/qca/crbtfw20.tlv
+ConditionPathExists=/lib/firmware/qca/crnv20.bin
+
+[Service]
+Type=simple
+Environment=ALIOTH_BT_ATTACH_MODE=qca
+ExecStart=/usr/local/sbin/alioth_bt_qca_init.sh
+ExecStopPost=/bin/sh -c 'for p in /sys/class/rfkill/rfkill*; do [ "$$(cat "$$p/name" 2>/dev/null)" = bt_power ] && echo 0 > "$$p/state"; done'
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=Alioth ADSP audio boot and ALSA devnode setup
+Documentation=file:/home/lele/桌面/project/redmik40/docs/boot-validation-log.md
+Requires=alioth-wifi-prepare.service
+After=local-fs.target systemd-udevd.service alioth-wifi-prepare.service
+Before=sound.target
+ConditionPathExists=/usr/local/sbin/alioth-audio-adsp-boot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/alioth-audio-adsp-boot
+RemainAfterExit=yes
+TimeoutStartSec=75
+
+[Install]
+WantedBy=multi-user.target

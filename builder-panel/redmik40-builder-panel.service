@@ -1,0 +1,20 @@
+[Unit]
+Description=Redmi K40 controlled kernel build panel
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/lele/redmik40-build/panel
+Environment=PANEL_HOST=127.0.0.1
+Environment=PANEL_PORT=18080
+Environment=PANEL_BASE=/home/lele/redmik40-build
+Environment=PANEL_DEFAULT_JOBS=36
+Environment=PANEL_BASIC_USER=builder
+Environment=PANEL_BASIC_PASSWORD_FILE=/home/lele/redmik40-build/panel/.panel-password
+ExecStart=/usr/bin/python3 /home/lele/redmik40-build/panel/app.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

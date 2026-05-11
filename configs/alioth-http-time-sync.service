@@ -1,0 +1,13 @@
+[Unit]
+Description=Alioth best-effort HTTP Date UTC sync
+Documentation=man:date(1)
+Wants=network.target
+After=network.target systemd-resolved.service alioth-wifi-bringup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/alioth-http-time-sync
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

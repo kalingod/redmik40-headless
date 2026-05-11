@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Redmi K40 Build Panel</title>
+  <style>
+    :root {
+      --bg: #11140f;
+      --panel: #1b2118;
+      --panel-2: #222a1e;
+      --ink: #f0ead6;
+      --muted: #a9b097;
+      --line: #3b4632;
+      --green: #9ed46a;
+      --amber: #f0b35a;
+      --red: #e9745f;
+      --blue: #7db4d8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(158, 212, 106, 0.18), transparent 32rem),
+        linear-gradient(135deg, #11140f 0%, #171c14 42%, #0e120c 100%);
+    }
+    header {
+      padding: 28px clamp(18px, 4vw, 48px) 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(24px, 3vw, 42px);
+      letter-spacing: -0.05em;
+    }
+    .sub {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(300px, 430px) 1fr;
+      gap: 18px;
+      padding: 18px clamp(18px, 4vw, 48px) 36px;
+    }
+    .card {
+      background: linear-gradient(180deg, rgba(34, 42, 30, 0.96), rgba(27, 33, 24, 0.96));
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
+      overflow: hidden;
+    }
+    .card h2 {
+      margin: 0;
+      padding: 16px 18px 12px;
+      font-size: 14px;
+      color: var(--green);
+      border-bottom: 1px solid var(--line);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .body { padding: 16px 18px 18px; }
+    .stack { display: grid; gap: 14px; }
+    label {
+      display: grid;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    input, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 11px 12px;
+      color: var(--ink);
+      background: #10150d;
+      outline: none;
+      font: inherit;
+    }
+    input:focus, select:focus { border-color: var(--green); }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .check {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--ink);
+      font-size: 13px;
+    }
+    .check input { width: auto; }
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 12px 14px;
+      cursor: pointer;
+      color: #10150d;
+      background: var(--green);
+      font: inherit;
+      font-weight: 700;
+    }
+    button.secondary { background: var(--amber); }
+    button.ghost {
+      color: var(--ink);
+      background: transparent;
+      border: 1px solid var(--line);
+    }
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .fact {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(16, 21, 13, 0.7);
+      min-width: 0;
+    }
+    .fact b {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      margin-bottom: 6px;
+    }
+    .fact span {
+      display: block;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .task {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(59, 70, 50, 0.7);
+      cursor: pointer;
+    }
+    .task:last-child { border-bottom: 0; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: #10150d;
+      background: var(--blue);
+    }
+    .pill.running, .pill.queued { background: var(--amber); }
+    .pill.success { background: var(--green); }
+    .pill.failed, .pill.stale { background: var(--red); }
+    pre {
+      margin: 0;
+      min-height: 420px;
+      max-height: 62vh;
+      overflow: auto;
+      padding: 16px;
+      color: #d9e5c3;
+      background: #090c08;
+      border-top: 1px solid var(--line);
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+    }
+    .artifact {
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(59, 70, 50, 0.7);
+    }
+    .artifact:last-child { border-bottom: 0; }
+    a { color: var(--green); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .files {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .file {
+      padding: 6px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(16, 21, 13, 0.7);
+      font-size: 12px;
+    }
+    .msg {
+      min-height: 18px;
+      color: var(--amber);
+      font-size: 12px;
+    }
+    @media (max-width: 920px) {
+      main { grid-template-columns: 1fr; }
+      .facts { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Redmi K40 Build Panel</h1>
+    <div class="sub">受控同步、编译、日志和产物下载。默认建议通过 SSH tunnel 访问。</div>
+  </header>
+  <main>
+    <section class="stack">
+      <div class="card">
+        <h2>Build Control</h2>
+        <div class="body stack">
+          <label>Project
+            <select id="project"></select>
+          </label>
+          <label>Branch
+            <input id="branch" value="lineage-20" autocomplete="off">
+          </label>
+          <div class="row">
+            <label>Jobs
+              <input id="jobs" type="number" min="1" max="72" value="36">
+            </label>
+            <label>Mode
+              <select id="mode">
+                <option value="build">Build only</option>
+                <option value="sync-build">Sync then build</option>
+              </select>
+            </label>
+          </div>
+          <label class="check">
+            <input id="systemd" type="checkbox" checked>
+            Include systemd-friendly config fragment
+          </label>
+          <div class="row">
+            <button id="syncBtn" class="secondary">Sync</button>
+            <button id="buildBtn">Build</button>
+          </div>
+          <div class="msg" id="message"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Status</h2>
+        <div class="body">
+          <div class="facts" id="facts"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Tasks</h2>
+        <div class="body" id="tasks"></div>
+      </div>
+
+      <div class="card">
+        <h2>Artifacts</h2>
+        <div class="body" id="artifacts"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Log Tail</h2>
+      <pre id="log">No task selected.</pre>
+    </section>
+  </main>
+
+  <script>
+    let selectedTask = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    function setMessage(text) {
+      $("message").textContent = text || "";
+    }
+
+    async function api(path, options = {}) {
+      const res = await fetch(path, {
+        headers: {"Content-Type": "application/json"},
+        ...options
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      return data;
+    }
+
+    function fmtSize(bytes) {
+      if (bytes > 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + " MB";
+      if (bytes > 1024) return (bytes / 1024).toFixed(1) + " KB";
+      return bytes + " B";
+    }
+
+    async function refreshStatus() {
+      const data = await api("/api/status");
+      $("branch").value = $("branch").value || data.default_branch;
+      $("jobs").value = $("jobs").value || data.default_jobs;
+      const project = $("project");
+      if (!project.options.length) {
+        for (const item of data.projects) {
+          const opt = document.createElement("option");
+          opt.value = item.id;
+          opt.textContent = item.label;
+          project.appendChild(opt);
+        }
+      }
+      const facts = [
+        ["Current branch", data.branch || "unknown"],
+        ["HEAD", data.head || "unknown"],
+        ["Dirty files", String(data.dirty_count)],
+        ["Active task", data.active_task || "none"],
+        ["Kernel dir", data.kernel_dir],
+        ["Artifact root", data.artifact_root],
+        ["Builder image", data.builder_image || "missing"],
+        ["Panel", data.host + ":" + data.port]
+      ];
+      $("facts").innerHTML = facts.map(([k, v]) =>
+        `<div class="fact"><b>${k}</b><span title="${String(v)}">${String(v)}</span></div>`
+      ).join("");
+    }
+
+    async function refreshTasks() {
+      const data = await api("/api/tasks");
+      $("tasks").innerHTML = data.tasks.map(t => `
+        <div class="task" onclick="selectTask(${t.id})">
+          <span class="pill ${t.status}">${t.status}</span>
+          <div>#${t.id} ${t.kind} ${t.branch}<br><span class="sub">${t.created_at}</span></div>
+          <span>${t.exit_code === null ? "" : t.exit_code}</span>
+        </div>
+      `).join("") || "<div class='sub'>No tasks yet.</div>";
+      if (!selectedTask && data.tasks.length) selectedTask = data.tasks[0].id;
+    }
+
+    async function refreshTaskLog() {
+      if (!selectedTask) return;
+      const data = await api(`/api/tasks/${selectedTask}`);
+      $("log").textContent = data.task.log_tail || "Log is empty.";
+    }
+
+    async function refreshArtifacts() {
+      const data = await api("/api/artifacts");
+      $("artifacts").innerHTML = data.artifacts.map(a => `
+        <div class="artifact">
+          <div>${a.name}</div>
+          <div class="files">
+            ${a.files.map(f => `<a class="file" href="${f.url}">${f.name} ${fmtSize(f.size)}</a>`).join("")}
+          </div>
+        </div>
+      `).join("") || "<div class='sub'>No artifacts yet.</div>";
+    }
+
+    async function selectTask(id) {
+      selectedTask = id;
+      await refreshTaskLog();
+    }
+
+    async function submitSync() {
+      setMessage("Sync task submitted...");
+      const data = await api("/api/sync", {
+        method: "POST",
+        body: JSON.stringify({
+          project: $("project").value,
+          branch: $("branch").value
+        })
+      });
+      selectedTask = data.task_id;
+      setMessage(`Task #${data.task_id} submitted.`);
+      await refreshAll();
+    }
+
+    async function submitBuild() {
+      setMessage("Build task submitted...");
+      const data = await api("/api/build", {
+        method: "POST",
+        body: JSON.stringify({
+          project: $("project").value,
+          branch: $("branch").value,
+          jobs: Number($("jobs").value || 36),
+          sync_first: $("mode").value === "sync-build",
+          systemd_config: $("systemd").checked
+        })
+      });
+      selectedTask = data.task_id;
+      setMessage(`Task #${data.task_id} submitted.`);
+      await refreshAll();
+    }
+
+    async function refreshAll() {
+      try {
+        await refreshStatus();
+        await refreshTasks();
+        await refreshTaskLog();
+        await refreshArtifacts();
+      } catch (err) {
+        setMessage(err.message);
+      }
+    }
+
+    $("syncBtn").addEventListener("click", () => submitSync().catch(err => setMessage(err.message)));
+    $("buildBtn").addEventListener("click", () => submitBuild().catch(err => setMessage(err.message)));
+    refreshAll();
+    setInterval(refreshAll, 5000);
+  </script>
+</body>
+</html>

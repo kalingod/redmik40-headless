@@ -1,0 +1,38 @@
+# Large binaries
+artifacts/
+*.img
+*.bin
+*.dtb
+*.dtbo
+*.elf
+*.ko
+*.o
+*.a
+tools/platform-tools/
+tools/busybox-aarch64
+
+# Local secrets/state
+.env
+.env.*
+*.log
+*.pid
+*.sqlite
+*.sqlite3
+.panel-password
+panel.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Build outputs
+out/
+build/
+dist/
+
+# macOS
+.DS_Store
+
+# Editor
+*.swp
+*~
