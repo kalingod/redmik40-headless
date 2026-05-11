@@ -10,6 +10,7 @@ Environment=PANEL_HOST=127.0.0.1
 Environment=PANEL_PORT=18080
 Environment=PANEL_BASE=/home/lele/redmik40-build
 Environment=PANEL_DEFAULT_JOBS=36
+Environment=PANEL_DEFAULT_BRANCH=lineage-20-headless
 Environment=PANEL_BASIC_USER=builder
 Environment=PANEL_BASIC_PASSWORD_FILE=/home/lele/redmik40-build/panel/.panel-password
 ExecStart=/usr/bin/python3 /home/lele/redmik40-build/panel/app.py

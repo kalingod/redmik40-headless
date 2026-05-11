@@ -28,7 +28,7 @@ BUILD_SCRIPT = Path(
     os.environ.get("PANEL_BUILD_SCRIPT", PROJECT_DIR / "scripts" / "build_lineage_sm8250_alioth_kernel.sh")
 ).expanduser()
 BUILDER_IMAGE = os.environ.get("PANEL_BUILDER_IMAGE", "redmik40-kernel-builder:bookworm")
-DEFAULT_BRANCH = os.environ.get("PANEL_DEFAULT_BRANCH", "lineage-20")
+DEFAULT_BRANCH = os.environ.get("PANEL_DEFAULT_BRANCH", "lineage-20-headless")
 DEFAULT_JOBS = int(os.environ.get("PANEL_DEFAULT_JOBS", os.environ.get("JOBS", "36")))
 AUTH_USER = os.environ.get("PANEL_BASIC_USER")
 AUTH_PASSWORD = os.environ.get("PANEL_BASIC_PASSWORD")
