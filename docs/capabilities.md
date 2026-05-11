@@ -22,6 +22,24 @@ upstream https://github.com/xiaomi-sm8250-devs/android_kernel_xiaomi_sm8250
 branch   lineage-20-headless
 ```
 
+Build mode:
+
+- Default panel builds are incremental and reuse the output directory.
+- Use `Clean build` only when config, generated headers, or stale outputs need a full reset.
+- The build script mounts persistent ccache at:
+
+```text
+/home/lele/redmik40-build/lineage-sm8250/cache/ccache
+```
+
+Relevant build environment:
+
+```text
+JOBS=36
+CLEAN_BUILD=no
+CCACHE_DIR_HOST=/home/lele/redmik40-build/lineage-sm8250/cache/ccache
+```
+
 ## Remote artifact retrieval
 
 After a successful remote build, the agent should retrieve build artifacts by

@@ -228,6 +228,10 @@
             <input id="systemd" type="checkbox" checked>
             Include systemd-friendly config fragment
           </label>
+          <label class="check">
+            <input id="clean" type="checkbox">
+            Clean build: remove output directory before compiling
+          </label>
           <div class="row">
             <button id="syncBtn" class="secondary">Sync</button>
             <button id="buildBtn">Build</button>
@@ -303,6 +307,12 @@
         ["HEAD", data.head || "unknown"],
         ["Dirty files", String(data.dirty_count)],
         ["Active task", data.active_task || "none"],
+        ["Load avg", data.loadavg ? data.loadavg.map(x => x.toFixed(2)).join(" / ") : "unknown"],
+        ["CPU cores", String(data.cpu_count || "unknown")],
+        ["Build procs", String(data.build_processes || "0")],
+        ["Object files", String(data.object_count ?? "unknown")],
+        ["Out size", data.out_size || "unknown"],
+        ["Latest task", data.latest_task ? `#${data.latest_task.id} ${data.latest_task.status}` : "none"],
         ["Kernel dir", data.kernel_dir],
         ["Artifact root", data.artifact_root],
         ["Builder image", data.builder_image || "missing"],
@@ -318,7 +328,7 @@
       $("tasks").innerHTML = data.tasks.map(t => `
         <div class="task" onclick="selectTask(${t.id})">
           <span class="pill ${t.status}">${t.status}</span>
-          <div>#${t.id} ${t.kind} ${t.branch}<br><span class="sub">${t.created_at}</span></div>
+          <div>#${t.id} ${t.kind} ${t.branch} ${t.clean_build ? "clean" : "incremental"}<br><span class="sub">${t.created_at}</span></div>
           <span>${t.exit_code === null ? "" : t.exit_code}</span>
         </div>
       `).join("") || "<div class='sub'>No tasks yet.</div>";
@@ -371,7 +381,8 @@
           branch: $("branch").value,
           jobs: Number($("jobs").value || 36),
           sync_first: $("mode").value === "sync-build",
-          systemd_config: $("systemd").checked
+          systemd_config: $("systemd").checked,
+          clean_build: $("clean").checked
         })
       });
       selectedTask = data.task_id;

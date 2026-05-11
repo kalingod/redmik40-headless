@@ -86,6 +86,7 @@ def init_db():
                 jobs INTEGER,
                 sync_first INTEGER NOT NULL DEFAULT 0,
                 systemd_config INTEGER NOT NULL DEFAULT 1,
+                clean_build INTEGER NOT NULL DEFAULT 0,
                 log_path TEXT NOT NULL,
                 artifact_dir TEXT,
                 exit_code INTEGER,
@@ -98,6 +99,9 @@ def init_db():
             )
             """
         )
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+        if "clean_build" not in columns:
+            conn.execute("ALTER TABLE tasks ADD COLUMN clean_build INTEGER NOT NULL DEFAULT 0")
         conn.execute(
             "UPDATE tasks SET status='stale', updated_at=? WHERE status IN ('queued', 'running')",
             (utc_now(),),
@@ -209,7 +213,7 @@ def sync_repo(task_id, project, branch):
     run_logged(task_id, ["git", "rev-parse", "--short=12", "HEAD"], repo)
 
 
-def build_kernel(task_id, project, branch, jobs, sync_first, systemd_config):
+def build_kernel(task_id, project, branch, jobs, sync_first, systemd_config, clean_build):
     cfg = PROJECTS[project]
     if sync_first:
         sync_repo(task_id, project, branch)
@@ -228,6 +232,8 @@ def build_kernel(task_id, project, branch, jobs, sync_first, systemd_config):
             "BUILDER_IMAGE": BUILDER_IMAGE,
             "JOBS": str(jobs),
             "SYSTEMD_FRIENDLY_CONFIG": "yes" if systemd_config else "no",
+            "CLEAN_BUILD": "yes" if clean_build else "no",
+            "CCACHE_DIR_HOST": str(BASE_DIR / "cache" / "ccache"),
         }
     )
     command = ["bash", str(cfg["build_script"])]
@@ -261,6 +267,7 @@ def task_worker(task_id):
                 int(task["jobs"] or DEFAULT_JOBS),
                 bool(task["sync_first"]),
                 bool(task["systemd_config"]),
+                bool(task["clean_build"]),
             )
         else:
             raise RuntimeError("unknown task kind")
@@ -291,7 +298,7 @@ def has_active_task():
     return row["id"] if row else None
 
 
-def create_task(kind, project, branch, jobs=None, sync_first=False, systemd_config=True):
+def create_task(kind, project, branch, jobs=None, sync_first=False, systemd_config=True, clean_build=False):
     project = validate_project(project)
     branch = validate_branch(branch)
     if jobs is not None:
@@ -307,9 +314,9 @@ def create_task(kind, project, branch, jobs=None, sync_first=False, systemd_conf
             cur = conn.execute(
                 """
                 INSERT INTO tasks (
-                    kind, status, project, branch, jobs, sync_first, systemd_config,
+                    kind, status, project, branch, jobs, sync_first, systemd_config, clean_build,
                     log_path, created_at, updated_at
-                ) VALUES (?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     kind,
@@ -318,6 +325,7 @@ def create_task(kind, project, branch, jobs=None, sync_first=False, systemd_conf
                     jobs,
                     1 if sync_first else 0,
                     1 if systemd_config else 0,
+                    1 if clean_build else 0,
                     str(log_path),
                     now,
                     now,
@@ -367,6 +375,32 @@ def list_artifacts():
             }
         )
     return items[:30]
+
+
+def directory_size_label(path):
+    path = Path(path)
+    if not path.exists():
+        return None
+    result = quick_cmd(["du", "-sh", str(path)], PROJECT_DIR, timeout=10)
+    if not result["ok"]:
+        return None
+    return result["output"].split("\t", 1)[0]
+
+
+def count_suffix_files(path, suffix):
+    path = Path(path)
+    if not path.exists():
+        return 0
+    count = 0
+    for _, _, files in os.walk(path):
+        count += sum(1 for name in files if name.endswith(suffix))
+    return count
+
+
+def latest_task_snapshot():
+    with connect_db() as conn:
+        row = conn.execute("SELECT * FROM tasks ORDER BY id DESC LIMIT 1").fetchone()
+    return row_to_dict(row)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -446,6 +480,7 @@ class Handler(BaseHTTPRequestHandler):
                     jobs=body.get("jobs", DEFAULT_JOBS),
                     sync_first=bool(body.get("sync_first", False)),
                     systemd_config=bool(body.get("systemd_config", True)),
+                    clean_build=bool(body.get("clean_build", False)),
                 )
                 return self.send_json(202, {"task_id": task_id})
             self.send_error(404)
@@ -470,6 +505,9 @@ class Handler(BaseHTTPRequestHandler):
         dirty = quick_cmd(["git", "status", "--porcelain"], KERNEL_DIR)
         image = quick_cmd(["docker", "image", "inspect", BUILDER_IMAGE, "--format", "{{.Id}} {{.Size}}"], PROJECT_DIR)
         active = has_active_task()
+        panel_out = PROJECTS["lineage-sm8250-alioth"]["out_dir"]
+        latest_task = latest_task_snapshot()
+        build_processes = quick_cmd(["pgrep", "-c", "-f", "clang|ld.lld|make -C /work/kernel"], PROJECT_DIR)
         self.send_json(
             200,
             {
@@ -486,6 +524,13 @@ class Handler(BaseHTTPRequestHandler):
                 "dirty_count": len(dirty["output"].splitlines()) if dirty["ok"] and dirty["output"] else 0,
                 "builder_image": image["output"] if image["ok"] else None,
                 "active_task": active,
+                "loadavg": list(os.getloadavg()),
+                "cpu_count": os.cpu_count(),
+                "build_processes": build_processes["output"] if build_processes["ok"] else "0",
+                "out_dir": str(panel_out),
+                "out_size": directory_size_label(panel_out),
+                "object_count": count_suffix_files(panel_out, ".o"),
+                "latest_task": latest_task,
                 "projects": [{"id": key, "label": cfg["label"]} for key, cfg in PROJECTS.items()],
             },
         )

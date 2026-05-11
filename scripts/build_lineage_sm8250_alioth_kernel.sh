@@ -12,6 +12,8 @@ BUILDER_IMAGE="${BUILDER_IMAGE:-redmik40-kernel-builder:bullseye}"
 JOBS="${JOBS:-36}"
 SYSTEMD_FRIENDLY_CONFIG="${SYSTEMD_FRIENDLY_CONFIG:-yes}"
 EXTRA_CONFIG_FRAGMENT="${EXTRA_CONFIG_FRAGMENT:-}"
+CLEAN_BUILD="${CLEAN_BUILD:-no}"
+CCACHE_DIR_HOST="${CCACHE_DIR_HOST:-$WORK_DIR/cache/ccache}"
 
 die() {
   echo "error: $*" >&2
@@ -45,7 +47,7 @@ main() {
   command -v docker >/dev/null 2>&1 || die "missing command: docker"
   docker image inspect "$BUILDER_IMAGE" >/dev/null 2>&1 || die "missing Docker image: $BUILDER_IMAGE"
 
-  mkdir -p "$ARTIFACT_DIR"
+  mkdir -p "$ARTIFACT_DIR" "$CCACHE_DIR_HOST"
   extra_config_in_work=""
   if [ -n "$EXTRA_CONFIG_FRAGMENT" ]; then
     [ -f "$EXTRA_CONFIG_FRAGMENT" ] || die "missing EXTRA_CONFIG_FRAGMENT: $EXTRA_CONFIG_FRAGMENT"
@@ -57,12 +59,15 @@ main() {
   art_in_work="$(work_path_for_container "$ARTIFACT_DIR")"
 
   log "building Lineage 20 alioth kernel with LLVM"
+  log "mode: clean=$CLEAN_BUILD jobs=$JOBS ccache=$CCACHE_DIR_HOST out=$OUT_DIR"
   docker run --rm \
     -v "$WORK_DIR:/work" \
+    -v "$CCACHE_DIR_HOST:/cache/ccache" \
     -e OUT_IN_WORK="$out_in_work" \
     -e ART_IN_WORK="$art_in_work" \
     -e SYSTEMD_FRIENDLY_CONFIG="$SYSTEMD_FRIENDLY_CONFIG" \
     -e EXTRA_CONFIG_IN_WORK="$extra_config_in_work" \
+    -e CLEAN_BUILD="$CLEAN_BUILD" \
     -w /work \
     "$BUILDER_IMAGE" \
     bash -lc "
@@ -70,9 +75,13 @@ set -euo pipefail
 KERNEL=/work/kernel
 OUT=\"\$OUT_IN_WORK\"
 ART=\"\$ART_IN_WORK\"
-rm -rf \"\$OUT\"
+if [ \"\$CLEAN_BUILD\" = yes ]; then
+  rm -rf \"\$OUT\"
+fi
 mkdir -p \"\$OUT\" \"\$ART\"
+find \"\$ART\" -maxdepth 1 -type f -delete
 
+if [ \"\$CLEAN_BUILD\" = yes ] || [ ! -f \"\$OUT\"/.config ]; then
 make -C \"\$KERNEL\" O=\"\$OUT\" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- vendor/kona-perf_defconfig
 fragments=(
   \"\$KERNEL\"/arch/arm64/configs/vendor/xiaomi/sm8250-common.config
@@ -121,6 +130,9 @@ fi
 \"\$KERNEL\"/scripts/kconfig/merge_config.sh -m -O \"\$OUT\" \
   \"\$OUT\"/.config \
   \"\${fragments[@]}\"
+else
+  echo \"reusing existing kernel config: \$OUT/.config\"
+fi
 make -C \"\$KERNEL\" O=\"\$OUT\" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 make -C \"\$KERNEL\" O=\"\$OUT\" ARCH=arm64 LLVM=1 CROSS_COMPILE=aarch64-linux-gnu- -j$JOBS Image dtbs
 
