@@ -4,6 +4,9 @@ set -eu
 CONFIG_PATH="${ALIOTH_WIFI_CONFIG:-/etc/alioth-wifi-default}"
 RUN_DIR="${ALIOTH_WIFI_RUN_DIR:-/run/alioth-wifi-client}"
 WPA_DIR="${ALIOTH_WPA_CTRL_DIR:-/run/wpa_supplicant}"
+STATE="${ALIOTH_WIFI_STATE:-/run/alioth-wifi-state}"
+PREFER_ROUTE="${ALIOTH_WIFI_PREFER_ROUTE:-yes}"
+DNS_SERVERS="${ALIOTH_WIFI_DNS:-223.5.5.5 1.1.1.1}"
 
 usage() {
   cat >&2 <<'EOF'
@@ -83,6 +86,8 @@ try_connect() {
   echo "connecting iface=$iface ssid=$ssid"
   ip link set "$iface" up 2>/dev/null || true
   wpa_cli -i "$iface" terminate >/dev/null 2>&1 || true
+  dhcpcd -4 -k "$iface" >/dev/null 2>&1 || true
+  ip -4 addr flush dev "$iface" scope global 2>/dev/null || true
   sleep 1
   rm -f "$WPA_DIR/$iface"
 
@@ -115,6 +120,98 @@ try_connect() {
   return "$dhcp_rc"
 }
 
+prefer_wifi_route() {
+  iface="$1"
+  [ "$PREFER_ROUTE" = "yes" ] || return 0
+
+  gateway="$(ip route show default dev "$iface" 2>/dev/null | awk '/^default / { for (i = 1; i <= NF; i++) if ($i == "via") { print $(i + 1); exit } }')"
+  [ -n "$gateway" ] || return 0
+
+  ip route replace default via "$gateway" dev "$iface" metric 50 2>/dev/null || true
+
+  while ip route show default 2>/dev/null | grep -q '^default via 172\.16\.42\.1 dev usb0'; do
+    ip route del default via 172.16.42.1 dev usb0 2>/dev/null ||
+      ip route del default via 172.16.42.1 dev usb0 proto static 2>/dev/null ||
+      break
+  done
+  if ip link show usb0 >/dev/null 2>&1; then
+    ip route replace default via 172.16.42.1 dev usb0 metric 5000 2>/dev/null || true
+  fi
+}
+
+prune_extra_ipv4_addrs() {
+  iface="$1"
+  preferred="$(ip route show default dev "$iface" 2>/dev/null | awk '/^default / && / proto dhcp / { for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit } }')"
+  if [ -z "$preferred" ] && command -v wpa_cli >/dev/null 2>&1; then
+    preferred="$(wpa_cli -i "$iface" status 2>/dev/null | sed -n 's/^ip_address=//p' | head -n 1)"
+  fi
+  [ -n "$preferred" ] || return 0
+
+  ip -o -4 addr show dev "$iface" scope global 2>/dev/null | awk '{ print $4 }' |
+    while IFS= read -r cidr; do
+      addr="${cidr%/*}"
+      [ "$addr" = "$preferred" ] && continue
+      ip addr del "$cidr" dev "$iface" 2>/dev/null || true
+    done
+}
+
+prefer_wifi_dns() {
+  iface="$1"
+  tmp="$RUN_DIR/resolv.conf"
+  : > "$tmp"
+
+  for dns in $DNS_SERVERS; do
+    printf 'nameserver %s\n' "$dns" >> "$tmp"
+  done
+  awk '/^nameserver / { print }' /etc/resolv.conf 2>/dev/null |
+    while read -r _ dns; do
+      case " $DNS_SERVERS " in
+        *" $dns "*) continue ;;
+      esac
+      printf 'nameserver %s\n' "$dns"
+    done >> "$tmp"
+
+  if [ -s "$tmp" ]; then
+    cp -n /etc/resolv.conf /etc/resolv.conf.before-alioth-wifi 2>/dev/null || true
+    cp "$tmp" /etc/resolv.conf 2>/dev/null || true
+  fi
+
+  if command -v resolvectl >/dev/null 2>&1; then
+    resolvectl dns "$iface" $DNS_SERVERS >/dev/null 2>&1 || true
+    resolvectl default-route "$iface" yes >/dev/null 2>&1 || true
+    resolvectl domain "$iface" '~.' >/dev/null 2>&1 || true
+  fi
+}
+
+write_state() {
+  iface="$1"
+  ssid="$2"
+  {
+    printf 'mode=client-connected\n'
+    printf 'iface=%s\n' "$iface"
+    printf 'ssid=%s\n' "$ssid"
+    printf 'boot_id=%s\n' "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
+    printf 'updated_utc=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    ip -brief addr show "$iface" 2>/dev/null | sed 's/^/ip=/'
+    ip route show default 2>/dev/null | sed 's/^/default_route=/'
+    if command -v wpa_cli >/dev/null 2>&1; then
+      wpa_cli -i "$iface" status 2>/dev/null | sed 's/^/wpa=/'
+    fi
+  } > "$STATE"
+}
+
+connect_and_finalize() {
+  ssid="$1"
+  psk="${2:-}"
+  iface="$3"
+
+  try_connect "$ssid" "$psk" "$iface" || return 1
+  prune_extra_ipv4_addrs "$iface"
+  prefer_wifi_route "$iface"
+  prefer_wifi_dns "$iface"
+  write_state "$iface" "$ssid"
+}
+
 systemctl start alioth-wifi-bringup.service >/dev/null 2>&1 || true
 
 iface="${ALIOTH_WIFI_IFACE:-$(find_managed_iface || true)}"
@@ -124,12 +221,12 @@ if [ -z "$iface" ]; then
 fi
 
 if [ "$#" -ge 1 ]; then
-  try_connect "$1" "${2:-}" "$iface"
+  connect_and_finalize "$1" "${2:-}" "$iface"
   exit $?
 fi
 
 if [ -n "${ALIOTH_WIFI_SSID:-}" ]; then
-  try_connect "$ALIOTH_WIFI_SSID" "${ALIOTH_WIFI_PSK:-}" "$iface"
+  connect_and_finalize "$ALIOTH_WIFI_SSID" "${ALIOTH_WIFI_PSK:-}" "$iface"
   exit $?
 fi
 
@@ -138,7 +235,7 @@ if [ -s "$CONFIG_PATH" ]; then
   while IFS= read -r ssid; do
     IFS= read -r psk || psk=""
     [ -n "$ssid" ] || continue
-    if try_connect "$ssid" "$psk" "$iface"; then
+    if connect_and_finalize "$ssid" "$psk" "$iface"; then
       rc=0
       break
     fi

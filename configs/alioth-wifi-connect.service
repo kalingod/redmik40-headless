@@ -1,0 +1,16 @@
+[Unit]
+Description=Alioth Wi-Fi client connection
+Requires=alioth-wifi-bringup.service
+After=lele-usb-net.service alioth-wifi-bringup.service systemd-resolved.service
+Wants=systemd-resolved.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/alioth-wifi-connect
+Restart=on-failure
+RestartSec=15
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

@@ -20,6 +20,7 @@ REBOOT_TOOL_SRC="${REBOOT_TOOL_SRC:-$REPO_DIR/src/alioth-reboot/alioth_reboot.c}
 REBOOT_TOOL_BIN="${REBOOT_TOOL_BIN:-}"
 STATUS_UI_SRC="${STATUS_UI_SRC:-$REPO_DIR/src/alioth-status-ui-c/alioth_status_ui.c}"
 STATUS_UI_BIN="${STATUS_UI_BIN:-}"
+STATUS_UI_CPU_BIN="${STATUS_UI_CPU_BIN:-}"
 STATUS_UI_WRAPPER_BIN="${STATUS_UI_WRAPPER_BIN:-}"
 INIT_MODE="${INIT_MODE:-shell}"
 UBUNTU_ROOTFS_PATH="${UBUNTU_ROOTFS_PATH:-/rootfs/ubuntu-26.04}"
@@ -33,12 +34,14 @@ DEFAULT_WIFI_PSK="${DEFAULT_WIFI_PSK:-${ALIOTH_WIFI_PSK:-}}"
 DEFAULT_WIFI_CONFIG="${DEFAULT_WIFI_CONFIG:-}"
 WIFI_PREPARE_HELPER_FILE="${WIFI_PREPARE_HELPER_FILE:-$REPO_DIR/scripts/alioth_wifi_prepare.sh}"
 WIFI_BRINGUP_HELPER_FILE="${WIFI_BRINGUP_HELPER_FILE:-$REPO_DIR/scripts/alioth_wifi_bringup.sh}"
+WIFI_CONNECT_HELPER_FILE="${WIFI_CONNECT_HELPER_FILE:-$REPO_DIR/scripts/alioth_wifi_connect.sh}"
 WIFI_STATUS_HELPER_FILE="${WIFI_STATUS_HELPER_FILE:-$REPO_DIR/scripts/alioth_wifi_status.sh}"
 ANDROID_DAEMON_HELPER_FILE="${ANDROID_DAEMON_HELPER_FILE:-$REPO_DIR/scripts/alioth_android_daemon.sh}"
 WIFI_PREPARE_UNIT_FILE="${WIFI_PREPARE_UNIT_FILE:-$REPO_DIR/configs/alioth-wifi-prepare.service}"
 WIFI_QRTR_UNIT_FILE="${WIFI_QRTR_UNIT_FILE:-$REPO_DIR/configs/alioth-qrtr-ns.service}"
 WIFI_CNSS_UNIT_FILE="${WIFI_CNSS_UNIT_FILE:-$REPO_DIR/configs/alioth-cnss-daemon.service}"
 WIFI_BRINGUP_UNIT_FILE="${WIFI_BRINGUP_UNIT_FILE:-$REPO_DIR/configs/alioth-wifi-bringup.service}"
+WIFI_CONNECT_UNIT_FILE="${WIFI_CONNECT_UNIT_FILE:-$REPO_DIR/configs/alioth-wifi-connect.service}"
 
 die() {
   echo "error: $*" >&2
@@ -1843,14 +1846,17 @@ stage_ubuntu_wifi_files() {
   overlay=/etc/alioth-rootfs-overlay
   stage_ubuntu_file "$overlay/usr/local/sbin/alioth-wifi-prepare" /mnt/ubuntu/usr/local/sbin/alioth-wifi-prepare 0755
   stage_ubuntu_file "$overlay/usr/local/sbin/alioth-wifi-bringup" /mnt/ubuntu/usr/local/sbin/alioth-wifi-bringup 0755
+  stage_ubuntu_file "$overlay/usr/local/sbin/alioth-wifi-connect" /mnt/ubuntu/usr/local/sbin/alioth-wifi-connect 0755
   stage_ubuntu_file "$overlay/usr/local/sbin/alioth-wifi-status" /mnt/ubuntu/usr/local/sbin/alioth-wifi-status 0755
   stage_ubuntu_file "$overlay/usr/local/sbin/alioth-android-daemon" /mnt/ubuntu/usr/local/sbin/alioth-android-daemon 0755
   stage_ubuntu_file "$overlay/etc/systemd/system/alioth-wifi-prepare.service" /mnt/ubuntu/etc/systemd/system/alioth-wifi-prepare.service 0644
   stage_ubuntu_file "$overlay/etc/systemd/system/alioth-qrtr-ns.service" /mnt/ubuntu/etc/systemd/system/alioth-qrtr-ns.service 0644
   stage_ubuntu_file "$overlay/etc/systemd/system/alioth-cnss-daemon.service" /mnt/ubuntu/etc/systemd/system/alioth-cnss-daemon.service 0644
   stage_ubuntu_file "$overlay/etc/systemd/system/alioth-wifi-bringup.service" /mnt/ubuntu/etc/systemd/system/alioth-wifi-bringup.service 0644
+  stage_ubuntu_file "$overlay/etc/systemd/system/alioth-wifi-connect.service" /mnt/ubuntu/etc/systemd/system/alioth-wifi-connect.service 0644
   mkdir -p /mnt/ubuntu/etc/systemd/system/multi-user.target.wants
   ln -sf ../alioth-wifi-bringup.service /mnt/ubuntu/etc/systemd/system/multi-user.target.wants/alioth-wifi-bringup.service
+  ln -sf ../alioth-wifi-connect.service /mnt/ubuntu/etc/systemd/system/multi-user.target.wants/alioth-wifi-connect.service
 }
 
 switch_to_ubuntu_root() {
@@ -2406,11 +2412,12 @@ build_reboot_tool() {
   chmod 0755 "$out"
 }
 
-build_status_ui() {
+build_status_ui_from() {
   local out="$1"
-  if [ -n "$STATUS_UI_BIN" ]; then
-    require_file "$STATUS_UI_BIN"
-    cp "$STATUS_UI_BIN" "$out"
+  local bin="$2"
+  if [ -n "$bin" ]; then
+    require_file "$bin"
+    cp "$bin" "$out"
     chmod 0755 "$out"
     return 0
   fi
@@ -2425,6 +2432,14 @@ build_status_ui() {
     bash -lc "aarch64-linux-gnu-gcc -Os -static -s -std=gnu11 -Wall -Wextra -Wno-format-truncation -o /work/out/alioth-status-ui /work/alioth_status_ui.c"
   cp "$OUT_DIR/alioth-status-ui" "$out"
   chmod 0755 "$out"
+}
+
+build_status_ui() {
+  build_status_ui_from "$1" "$STATUS_UI_BIN"
+}
+
+build_status_ui_cpu() {
+  build_status_ui_from "$1" "$STATUS_UI_CPU_BIN"
 }
 
 pack_boot_image() {
@@ -2509,24 +2524,29 @@ build() {
   mkdir -p "$overlay/usr/local/sbin" "$overlay/etc/systemd/system"
   require_file "$WIFI_PREPARE_HELPER_FILE"
   require_file "$WIFI_BRINGUP_HELPER_FILE"
+  require_file "$WIFI_CONNECT_HELPER_FILE"
   require_file "$WIFI_STATUS_HELPER_FILE"
   require_file "$ANDROID_DAEMON_HELPER_FILE"
   require_file "$WIFI_PREPARE_UNIT_FILE"
   require_file "$WIFI_QRTR_UNIT_FILE"
   require_file "$WIFI_CNSS_UNIT_FILE"
   require_file "$WIFI_BRINGUP_UNIT_FILE"
+  require_file "$WIFI_CONNECT_UNIT_FILE"
   cp "$WIFI_PREPARE_HELPER_FILE" "$overlay/usr/local/sbin/alioth-wifi-prepare"
   cp "$WIFI_BRINGUP_HELPER_FILE" "$overlay/usr/local/sbin/alioth-wifi-bringup"
+  cp "$WIFI_CONNECT_HELPER_FILE" "$overlay/usr/local/sbin/alioth-wifi-connect"
   cp "$WIFI_STATUS_HELPER_FILE" "$overlay/usr/local/sbin/alioth-wifi-status"
   cp "$ANDROID_DAEMON_HELPER_FILE" "$overlay/usr/local/sbin/alioth-android-daemon"
   chmod 0755 "$overlay/usr/local/sbin/alioth-wifi-prepare" \
     "$overlay/usr/local/sbin/alioth-wifi-bringup" \
+    "$overlay/usr/local/sbin/alioth-wifi-connect" \
     "$overlay/usr/local/sbin/alioth-wifi-status" \
     "$overlay/usr/local/sbin/alioth-android-daemon"
   cp "$WIFI_PREPARE_UNIT_FILE" "$overlay/etc/systemd/system/alioth-wifi-prepare.service"
   cp "$WIFI_QRTR_UNIT_FILE" "$overlay/etc/systemd/system/alioth-qrtr-ns.service"
   cp "$WIFI_CNSS_UNIT_FILE" "$overlay/etc/systemd/system/alioth-cnss-daemon.service"
   cp "$WIFI_BRINGUP_UNIT_FILE" "$overlay/etc/systemd/system/alioth-wifi-bringup.service"
+  cp "$WIFI_CONNECT_UNIT_FILE" "$overlay/etc/systemd/system/alioth-wifi-connect.service"
   chmod 0644 "$overlay"/etc/systemd/system/alioth-*.service
   if [ -n "$BUSYBOX_BIN" ]; then
     require_file "$BUSYBOX_BIN"
@@ -2545,7 +2565,7 @@ EOF
   chmod 0755 "$root/bin/reboot-bootloader"
   if [ -n "$STATUS_UI_WRAPPER_BIN" ]; then
     require_file "$STATUS_UI_WRAPPER_BIN"
-    build_status_ui "$root/bin/alioth-status-ui-cpu"
+    build_status_ui_cpu "$root/bin/alioth-status-ui-cpu"
     cp "$STATUS_UI_WRAPPER_BIN" "$root/bin/alioth-status-ui"
     chmod 0755 "$root/bin/alioth-status-ui"
   else
@@ -2604,6 +2624,7 @@ Environment:
   REBOOT_TOOL_BIN=$REBOOT_TOOL_BIN
   STATUS_UI_SRC=$STATUS_UI_SRC
   STATUS_UI_BIN=$STATUS_UI_BIN
+  STATUS_UI_CPU_BIN=$STATUS_UI_CPU_BIN
   STATUS_UI_WRAPPER_BIN=$STATUS_UI_WRAPPER_BIN
   NCM_DEVICE_IP=$NCM_DEVICE_IP
   NCM_HOST_IP=$NCM_HOST_IP
