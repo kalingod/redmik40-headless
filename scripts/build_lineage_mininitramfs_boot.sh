@@ -8,10 +8,12 @@ BASE_BOOT_IMG="${BASE_BOOT_IMG:-$REPO_DIR/images/orangefox-arch-chroot.img}"
 KERNEL_IMG="${KERNEL_IMG:-/vmdata/android/redmik40/lineage-sm8250/artifacts/kernel-lineage20-alioth/Image}"
 OUT_DIR="${OUT_DIR:-/vmdata/android/redmik40/lineage-sm8250/mininitramfs}"
 BUSYBOX_APK_URL="${BUSYBOX_APK_URL:-https://dl-cdn.alpinelinux.org/alpine/edge/main/aarch64/busybox-static-1.37.0-r31.apk}"
+BUSYBOX_BIN="${BUSYBOX_BIN:-}"
 ADB_BIN="${ADB_BIN:-adb}"
 FASTBOOT_BIN="${FASTBOOT_BIN:-fastboot}"
 BUILDER_IMAGE="${BUILDER_IMAGE:-redmik40-kernel-builder:bullseye}"
 MINITCPSH_SRC="${MINITCPSH_SRC:-$REPO_DIR/src/minitcpsh/minitcpsh.c}"
+MINITCPSH_BIN="${MINITCPSH_BIN:-}"
 USB_DHCPD_SRC="${USB_DHCPD_SRC:-$REPO_DIR/src/alioth-usb-dhcpd/alioth_usb_dhcpd.c}"
 USB_DHCPD_BIN="${USB_DHCPD_BIN:-}"
 REBOOT_TOOL_SRC="${REBOOT_TOOL_SRC:-$REPO_DIR/src/alioth-reboot/alioth_reboot.c}"
@@ -29,6 +31,14 @@ NCM_PORT="${NCM_PORT:-2323}"
 DEFAULT_WIFI_SSID="${DEFAULT_WIFI_SSID:-${ALIOTH_WIFI_SSID:-}}"
 DEFAULT_WIFI_PSK="${DEFAULT_WIFI_PSK:-${ALIOTH_WIFI_PSK:-}}"
 DEFAULT_WIFI_CONFIG="${DEFAULT_WIFI_CONFIG:-}"
+WIFI_PREPARE_HELPER_FILE="${WIFI_PREPARE_HELPER_FILE:-$REPO_DIR/scripts/alioth_wifi_prepare.sh}"
+WIFI_BRINGUP_HELPER_FILE="${WIFI_BRINGUP_HELPER_FILE:-$REPO_DIR/scripts/alioth_wifi_bringup.sh}"
+WIFI_STATUS_HELPER_FILE="${WIFI_STATUS_HELPER_FILE:-$REPO_DIR/scripts/alioth_wifi_status.sh}"
+ANDROID_DAEMON_HELPER_FILE="${ANDROID_DAEMON_HELPER_FILE:-$REPO_DIR/scripts/alioth_android_daemon.sh}"
+WIFI_PREPARE_UNIT_FILE="${WIFI_PREPARE_UNIT_FILE:-$REPO_DIR/configs/alioth-wifi-prepare.service}"
+WIFI_QRTR_UNIT_FILE="${WIFI_QRTR_UNIT_FILE:-$REPO_DIR/configs/alioth-qrtr-ns.service}"
+WIFI_CNSS_UNIT_FILE="${WIFI_CNSS_UNIT_FILE:-$REPO_DIR/configs/alioth-cnss-daemon.service}"
+WIFI_BRINGUP_UNIT_FILE="${WIFI_BRINGUP_UNIT_FILE:-$REPO_DIR/configs/alioth-wifi-bringup.service}"
 
 die() {
   echo "error: $*" >&2
@@ -167,6 +177,18 @@ mount_once() {
   else
     mount -t "$type" "$source" "$target" 2>/dev/null || return 1
   fi
+}
+
+bind_mount_once() {
+  source="$1"
+  target="$2"
+  [ -e "$source" ] || return 1
+  if [ -L "$target" ] || [ -f "$target" ]; then
+    rm -f "$target" 2>/dev/null || true
+  fi
+  mkdir -p "$target"
+  grep -q " $target " /proc/mounts 2>/dev/null && return 0
+  mount --bind "$source" "$target" 2>/dev/null || return 1
 }
 
 seed_dev_nodes_at() {
@@ -350,18 +372,50 @@ ubuntu_root_source() {
   esac
 }
 
-mount_ubuntu_root() {
-  mount_data_root || return 1
-  src="$(ubuntu_root_source)"
+ubuntu_arch_root_source() {
+  rel="$(cat /etc/alioth-ubuntu-rootfs 2>/dev/null || echo /rootfs/ubuntu-26.04)"
+  case "$rel" in
+    /data/*)
+      echo "/mnt/arch${rel}"
+      ;;
+    /*)
+      echo "/mnt/arch/data${rel}"
+      ;;
+    *)
+      echo "/mnt/arch/data/${rel}"
+      ;;
+  esac
+}
+
+bind_ubuntu_root_source() {
+  src="$1"
+  label="$2"
   [ -d "$src/bin" ] && [ -f "$src/etc/os-release" ] || {
-    log "Ubuntu rootfs missing or incomplete: $src"
+    log "Ubuntu rootfs missing or incomplete ($label): $src"
     return 1
   }
   mkdir -p /mnt/ubuntu
+  log "binding Ubuntu rootfs from $label: $src"
   grep -q " /mnt/ubuntu " /proc/mounts 2>/dev/null || mount --bind "$src" /mnt/ubuntu 2>/tmp/ubuntu-bind.err || {
     log "failed to bind Ubuntu rootfs: $(cat /tmp/ubuntu-bind.err 2>/dev/null)"
     return 1
   }
+  return 0
+}
+
+mount_ubuntu_root() {
+  if mount_data_root; then
+    src="$(ubuntu_root_source)"
+    bind_ubuntu_root_source "$src" "userdata" || true
+  fi
+
+  if ! grep -q " /mnt/ubuntu " /proc/mounts 2>/dev/null; then
+    log "trying Arch-hosted Ubuntu rootfs fallback"
+    mount_arch_root || return 1
+    src="$(ubuntu_arch_root_source)"
+    bind_ubuntu_root_source "$src" "arch" || return 1
+  fi
+
   mkdir -p /mnt/ubuntu/dev /mnt/ubuntu/proc /mnt/ubuntu/sys /mnt/ubuntu/run
   mount_dev_tree /mnt/ubuntu || return 1
   mount_once proc proc /mnt/ubuntu/proc || true
@@ -431,6 +485,14 @@ start_initramfs_tcp_shell() {
 }
 
 mount_arch_root() {
+  if grep -q " /mnt/arch " /proc/mounts 2>/dev/null; then
+    mkdir -p /mnt/arch/dev /mnt/arch/proc /mnt/arch/sys /mnt/arch/run
+    mount --bind /dev /mnt/arch/dev 2>/dev/null || true
+    mount_once proc proc /mnt/arch/proc || true
+    mount_once sysfs sysfs /mnt/arch/sys || true
+    mount_once tmpfs tmpfs /mnt/arch/run mode=0755 || true
+    return 0
+  fi
   dev="$(wait_arch_block || true)"
   [ -n "$dev" ] || {
     log "arch block device not found"
@@ -449,6 +511,189 @@ mount_arch_root() {
   }
   log "failed to mount Arch rootfs: $(cat /tmp/arch-mount.err 2>/dev/null)"
   return 1
+}
+
+setup_android_mounts_with_arch_tools() {
+  mount_arch_root || return 1
+  helper=/mnt/arch/var/tmp/alioth-switchroot
+  mkdir -p "$helper"
+  cat > "$helper/mount-android-for-ubuntu" <<'ARCH_MOUNT'
+#!/bin/sh
+set -u
+PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+log() {
+  mkdir -p /run 2>/dev/null || true
+  printf '[%s] %s\n' "$(cut -d' ' -f1 /proc/uptime 2>/dev/null || echo 0)" "$*" >>/run/alioth-switchroot.log 2>/dev/null || true
+  echo "[alioth-android-mount] $*" >/dev/kmsg 2>/dev/null || true
+}
+
+mount_once() {
+  type="$1"
+  source="$2"
+  target="$3"
+  opts="${4:-}"
+  mkdir -p "$target"
+  grep -q " $target " /proc/mounts 2>/dev/null && return 0
+  if [ -n "$opts" ]; then
+    mount -t "$type" -o "$opts" "$source" "$target" 2>/tmp/android-mount.err || return 1
+  else
+    mount -t "$type" "$source" "$target" 2>/tmp/android-mount.err || return 1
+  fi
+}
+
+bind_mount_once() {
+  source="$1"
+  target="$2"
+  [ -e "$source" ] || return 1
+  mkdir -p "$target"
+  grep -q " $target " /proc/mounts 2>/dev/null && return 0
+  mount --bind "$source" "$target" 2>/tmp/android-bind.err || return 1
+}
+
+create_block_node() {
+  target="$1"
+  majmin="$2"
+  maj="${majmin%:*}"
+  min="${majmin#*:}"
+  case "$maj:$min" in
+    *:*) ;;
+    *) return 0 ;;
+  esac
+  dir="${target%/*}"
+  [ "$dir" = "$target" ] || mkdir -p "$dir"
+  [ -b "$target" ] || mknod -m 0600 "$target" b "$maj" "$min" 2>/dev/null || true
+}
+
+populate_block_nodes() {
+  mkdir -p /dev/block/by-name
+  for sysdev in /sys/class/block/*; do
+    [ -e "$sysdev/dev" ] || continue
+    name="${sysdev##*/}"
+    create_block_node "/dev/block/$name" "$(cat "$sysdev/dev" 2>/dev/null || true)"
+    partname="$(grep '^PARTNAME=' "$sysdev/uevent" 2>/dev/null | cut -d= -f2- | head -n 1)"
+    if [ -n "$partname" ] && [ -b "/dev/block/$name" ]; then
+      ln -sf "../$name" "/dev/block/by-name/$partname" 2>/dev/null || true
+    fi
+  done
+}
+
+active_slot_suffix() {
+  suffix="$(tr ' ' '\n' </proc/cmdline 2>/dev/null | sed -n 's/^androidboot.slot_suffix=//p' | head -n 1)"
+  case "$suffix" in
+    _a|_b) echo "$suffix" ;;
+    a|b) echo "_$suffix" ;;
+    *) echo "_a" ;;
+  esac
+}
+
+dm_node_for_name() {
+  dm_name="$1"
+  [ -b "/dev/mapper/$dm_name" ] && return 0
+  for sysdev in /sys/block/dm-*; do
+    [ -e "$sysdev/dm/name" ] || continue
+    [ "$(cat "$sysdev/dm/name" 2>/dev/null || true)" = "$dm_name" ] || continue
+    majmin="$(cat "$sysdev/dev" 2>/dev/null || true)"
+    maj="${majmin%:*}"
+    min="${majmin#*:}"
+    [ -b "/dev/mapper/$dm_name" ] || mknod -m 0600 "/dev/mapper/$dm_name" b "$maj" "$min" 2>/dev/null || true
+    return 0
+  done
+  return 1
+}
+
+map_logical_partition() {
+  part="$1"
+  target="$2"
+  slot="$3"
+  dm_name="android_$part"
+
+  [ -b /dev/block/by-name/super ] || return 1
+  command -v lpdump >/dev/null 2>&1 || return 1
+  command -v dmsetup >/dev/null 2>&1 || return 1
+  mkdir -p /dev/mapper
+  [ -c /dev/mapper/control ] || mknod -m 0600 /dev/mapper/control c 10 236 2>/dev/null || true
+
+  if ! [ -b "/dev/mapper/$dm_name" ]; then
+    table="$(
+      lpdump --slot="$slot" /dev/block/by-name/super 2>/dev/null |
+        awk -v name="$part" '
+          $1 == "Name:" && $2 == name { in_part = 1; next }
+          in_part && $1 == "Name:" { exit }
+          in_part && $2 == ".." && $4 == "linear" {
+            printf "%s %s linear /dev/block/by-name/%s %s\n", $1, ($3 - $1 + 1), $5, $6
+          }
+        '
+    )"
+    [ -n "$table" ] || return 1
+    dmsetup remove "$dm_name" >/dev/null 2>&1 || true
+    printf '%s\n' "$table" | dmsetup create "$dm_name" >/dev/null 2>&1 || return 1
+    dmsetup mknodes >/dev/null 2>&1 || true
+    dm_node_for_name "$dm_name" || true
+  fi
+
+  [ -b "/dev/mapper/$dm_name" ] || return 1
+  mount_once ext4 "/dev/mapper/$dm_name" "$target" ro
+}
+
+setup_loop_nodes() {
+  [ -c /dev/loop-control ] || mknod -m 0600 /dev/loop-control c 10 237 2>/dev/null || true
+  for i in $(seq 0 7); do
+    [ -b "/dev/loop$i" ] || mknod -m 0600 "/dev/loop$i" b 7 "$i" 2>/dev/null || true
+  done
+}
+
+setup_android_runtime_apex() {
+  [ -f /mnt/android_system/system/apex/com.android.runtime.apex ] || return 1
+  [ -x /apex/com.android.runtime/bin/linker64 ] && return 0
+  command -v bsdtar >/dev/null 2>&1 || return 1
+  setup_loop_nodes
+  mkdir -p /apex/com.android.runtime /run/apex-runtime
+  rm -f /run/apex-runtime/apex_payload.img 2>/dev/null || true
+  bsdtar -xf /mnt/android_system/system/apex/com.android.runtime.apex -C /run/apex-runtime apex_payload.img >/dev/null 2>&1 || return 1
+  mount_once ext4 /run/apex-runtime/apex_payload.img /apex/com.android.runtime ro,loop || return 1
+  log "mounted Android runtime APEX"
+}
+
+setup_android_mounts() {
+  populate_block_nodes
+  suffix="$(active_slot_suffix)"
+  slot=0
+  [ "$suffix" = "_b" ] && slot=1
+  log "mounting Android dynamic partitions through Arch tools: suffix=$suffix slot=$slot"
+  map_logical_partition "system$suffix" /mnt/android_system "$slot" && log "mounted system$suffix" || log "android system mount skipped"
+  map_logical_partition "system_ext$suffix" /mnt/android_system_ext "$slot" && log "mounted system_ext$suffix" || log "android system_ext mount skipped"
+  map_logical_partition "product$suffix" /mnt/android_product "$slot" && log "mounted product$suffix" || log "android product mount skipped"
+  map_logical_partition "odm$suffix" /mnt/android_odm "$slot" && log "mounted odm$suffix" || log "android odm mount skipped"
+  map_logical_partition "vendor$suffix" /mnt/android_vendor "$slot" && log "mounted vendor$suffix" || log "android vendor mount skipped"
+
+  bind_mount_once /mnt/android_system/system /system && log "bound /system" || log "bind /system skipped"
+  bind_mount_once /mnt/android_vendor /vendor && log "bound /vendor" || log "bind /vendor skipped"
+  bind_mount_once /mnt/android_odm /odm && log "bound /odm" || log "bind /odm skipped"
+  bind_mount_once /mnt/android_product /product && log "bound /product" || log "bind /product skipped"
+  bind_mount_once /mnt/android_system_ext /system_ext && log "bound /system_ext" || log "bind /system_ext skipped"
+  [ -b /dev/block/by-name/persist ] && mount_once ext4 /dev/block/by-name/persist /mnt/vendor/persist ro || true
+  setup_android_runtime_apex || log "Android runtime APEX mount skipped"
+}
+
+setup_android_mounts
+ARCH_MOUNT
+  chmod 0755 "$helper/mount-android-for-ubuntu"
+  if /bin/busybox chroot /mnt/arch /var/tmp/alioth-switchroot/mount-android-for-ubuntu; then
+    log "Android mounts prepared through Arch tools"
+  else
+    log "Android mounts through Arch tools failed"
+    return 1
+  fi
+
+  bind_mount_once /mnt/arch/system /system && log "bound Android /system into initramfs" || log "initramfs /system bind skipped"
+  bind_mount_once /mnt/arch/vendor /vendor && log "bound Android /vendor into initramfs" || log "initramfs /vendor bind skipped"
+  bind_mount_once /mnt/arch/odm /odm && log "bound Android /odm into initramfs" || log "initramfs /odm bind skipped"
+  bind_mount_once /mnt/arch/product /product && log "bound Android /product into initramfs" || log "initramfs /product bind skipped"
+  bind_mount_once /mnt/arch/system_ext /system_ext && log "bound Android /system_ext into initramfs" || log "initramfs /system_ext bind skipped"
+  bind_mount_once /mnt/arch/apex /apex && log "bound Android /apex into initramfs" || log "initramfs /apex bind skipped"
+  bind_mount_once /mnt/arch/mnt/vendor /mnt/vendor && log "bound Android persist mount into initramfs" || true
+  return 0
 }
 
 write_enter_arch() {
@@ -1548,6 +1793,66 @@ EOF
   echo alioth-ubuntu > /mnt/ubuntu/etc/hostname
 }
 
+bind_ubuntu_path() {
+  src="$1"
+  dst="$2"
+  [ -e "$src" ] || return 1
+  target="/mnt/ubuntu$dst"
+  if [ -L "$target" ] || [ -f "$target" ]; then
+    rm -f "$target" 2>/dev/null || true
+  fi
+  mkdir -p "$target"
+  grep -q " $target " /proc/mounts 2>/dev/null && return 0
+  mount --bind "$src" "$target" 2>/tmp/ubuntu-android-bind.err || {
+    log "failed to bind $src -> $target: $(cat /tmp/ubuntu-android-bind.err 2>/dev/null)"
+    return 1
+  }
+}
+
+prepare_ubuntu_android_mounts() {
+  setup_android_mounts_with_arch_tools || log "Android partition bind preparation skipped"
+
+  for path in /system /vendor /odm /product /system_ext /apex /mnt/vendor; do
+    [ -e "$path" ] || continue
+    bind_ubuntu_path "$path" "$path" && log "bound $path into Ubuntu root" || true
+  done
+
+  if [ -d /mnt/arch/data ]; then
+    bind_ubuntu_path /mnt/arch/data /data && log "bound Arch /data into Ubuntu root" || true
+  elif [ -d /mnt/data ]; then
+    bind_ubuntu_path /mnt/data /data && log "bound userdata /data into Ubuntu root" || true
+  fi
+}
+
+stage_ubuntu_file() {
+  src="$1"
+  dst="$2"
+  mode="$3"
+  [ -f "$src" ] || return 0
+  mkdir -p "$(dirname "$dst")"
+  rm -f "$dst" 2>/dev/null || true
+  cp "$src" "$dst" 2>/tmp/ubuntu-stage-file.err || {
+    log "failed to stage $dst: $(cat /tmp/ubuntu-stage-file.err 2>/dev/null)"
+    return 1
+  }
+  chmod "$mode" "$dst" 2>/dev/null || true
+  log "staged $dst"
+}
+
+stage_ubuntu_wifi_files() {
+  overlay=/etc/alioth-rootfs-overlay
+  stage_ubuntu_file "$overlay/usr/local/sbin/alioth-wifi-prepare" /mnt/ubuntu/usr/local/sbin/alioth-wifi-prepare 0755
+  stage_ubuntu_file "$overlay/usr/local/sbin/alioth-wifi-bringup" /mnt/ubuntu/usr/local/sbin/alioth-wifi-bringup 0755
+  stage_ubuntu_file "$overlay/usr/local/sbin/alioth-wifi-status" /mnt/ubuntu/usr/local/sbin/alioth-wifi-status 0755
+  stage_ubuntu_file "$overlay/usr/local/sbin/alioth-android-daemon" /mnt/ubuntu/usr/local/sbin/alioth-android-daemon 0755
+  stage_ubuntu_file "$overlay/etc/systemd/system/alioth-wifi-prepare.service" /mnt/ubuntu/etc/systemd/system/alioth-wifi-prepare.service 0644
+  stage_ubuntu_file "$overlay/etc/systemd/system/alioth-qrtr-ns.service" /mnt/ubuntu/etc/systemd/system/alioth-qrtr-ns.service 0644
+  stage_ubuntu_file "$overlay/etc/systemd/system/alioth-cnss-daemon.service" /mnt/ubuntu/etc/systemd/system/alioth-cnss-daemon.service 0644
+  stage_ubuntu_file "$overlay/etc/systemd/system/alioth-wifi-bringup.service" /mnt/ubuntu/etc/systemd/system/alioth-wifi-bringup.service 0644
+  mkdir -p /mnt/ubuntu/etc/systemd/system/multi-user.target.wants
+  ln -sf ../alioth-wifi-bringup.service /mnt/ubuntu/etc/systemd/system/multi-user.target.wants/alioth-wifi-bringup.service
+}
+
 switch_to_ubuntu_root() {
   mount_ubuntu_root || return 1
   boot_mode="${1:-switchroot-ubuntu}"
@@ -1696,6 +2001,8 @@ EOF
       return 1
     }
     write_ubuntu_systemd_units
+    prepare_ubuntu_android_mounts
+    stage_ubuntu_wifi_files
     if [ ! -e /mnt/ubuntu/etc/ssh/ssh_host_ed25519_key ]; then
       if [ -x /mnt/ubuntu/usr/bin/ssh-keygen ] || [ -x /mnt/ubuntu/bin/ssh-keygen ]; then
         /bin/busybox chroot /mnt/ubuntu ssh-keygen -A >/tmp/ubuntu-ssh-keygen.log 2>&1 || true
@@ -2038,6 +2345,13 @@ PY
 
 build_minitcpsh() {
   local out="$1"
+  if [ -n "$MINITCPSH_BIN" ]; then
+    require_file "$MINITCPSH_BIN"
+    cp "$MINITCPSH_BIN" "$out"
+    chmod 0755 "$out"
+    return 0
+  fi
+
   require_cmd docker
   require_file "$MINITCPSH_SRC"
   log "building static aarch64 minitcpsh"
@@ -2168,7 +2482,7 @@ build() {
   local ramdisk="$OUT_DIR/initramfs.cpio.gz"
   local boot_img="$OUT_DIR/lineage-mininitramfs-boot.img"
 
-  if [ ! -f "$apk" ]; then
+  if [ -z "$BUSYBOX_BIN" ] && [ ! -f "$apk" ]; then
     log "downloading aarch64 static busybox"
     curl -L --fail --retry 3 -o "$apk" "$BUSYBOX_APK_URL"
   fi
@@ -2191,7 +2505,35 @@ build() {
     printf '%s\n%s\n' "$DEFAULT_WIFI_SSID" "$DEFAULT_WIFI_PSK" > "$root/etc/alioth-wifi-default"
     chmod 0600 "$root/etc/alioth-wifi-default"
   fi
-  tar -xOzf "$apk" bin/busybox.static > "$root/bin/busybox"
+  local overlay="$root/etc/alioth-rootfs-overlay"
+  mkdir -p "$overlay/usr/local/sbin" "$overlay/etc/systemd/system"
+  require_file "$WIFI_PREPARE_HELPER_FILE"
+  require_file "$WIFI_BRINGUP_HELPER_FILE"
+  require_file "$WIFI_STATUS_HELPER_FILE"
+  require_file "$ANDROID_DAEMON_HELPER_FILE"
+  require_file "$WIFI_PREPARE_UNIT_FILE"
+  require_file "$WIFI_QRTR_UNIT_FILE"
+  require_file "$WIFI_CNSS_UNIT_FILE"
+  require_file "$WIFI_BRINGUP_UNIT_FILE"
+  cp "$WIFI_PREPARE_HELPER_FILE" "$overlay/usr/local/sbin/alioth-wifi-prepare"
+  cp "$WIFI_BRINGUP_HELPER_FILE" "$overlay/usr/local/sbin/alioth-wifi-bringup"
+  cp "$WIFI_STATUS_HELPER_FILE" "$overlay/usr/local/sbin/alioth-wifi-status"
+  cp "$ANDROID_DAEMON_HELPER_FILE" "$overlay/usr/local/sbin/alioth-android-daemon"
+  chmod 0755 "$overlay/usr/local/sbin/alioth-wifi-prepare" \
+    "$overlay/usr/local/sbin/alioth-wifi-bringup" \
+    "$overlay/usr/local/sbin/alioth-wifi-status" \
+    "$overlay/usr/local/sbin/alioth-android-daemon"
+  cp "$WIFI_PREPARE_UNIT_FILE" "$overlay/etc/systemd/system/alioth-wifi-prepare.service"
+  cp "$WIFI_QRTR_UNIT_FILE" "$overlay/etc/systemd/system/alioth-qrtr-ns.service"
+  cp "$WIFI_CNSS_UNIT_FILE" "$overlay/etc/systemd/system/alioth-cnss-daemon.service"
+  cp "$WIFI_BRINGUP_UNIT_FILE" "$overlay/etc/systemd/system/alioth-wifi-bringup.service"
+  chmod 0644 "$overlay"/etc/systemd/system/alioth-*.service
+  if [ -n "$BUSYBOX_BIN" ]; then
+    require_file "$BUSYBOX_BIN"
+    cp "$BUSYBOX_BIN" "$root/bin/busybox"
+  else
+    tar -xOzf "$apk" bin/busybox.static > "$root/bin/busybox"
+  fi
   chmod 0755 "$root/bin/busybox"
   build_minitcpsh "$root/bin/minitcpsh"
   build_usb_dhcpd "$root/bin/alioth-usb-dhcpd"

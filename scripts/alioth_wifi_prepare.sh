@@ -22,35 +22,63 @@ make_block_node() {
   printf '%s\n' "$BLOCK_DIR/$name"
 }
 
-find_modem_b_node() {
+find_part_node() {
+  partname="$1"
+  fallback="${2:-}"
   for uevent in /sys/class/block/*/uevent; do
     [ -f "$uevent" ] || continue
-    if grep -qx 'PARTNAME=modem_b' "$uevent"; then
+    if grep -qx "PARTNAME=$partname" "$uevent"; then
       block_dir="${uevent%/uevent}"
       devno="$(cat "$block_dir/dev")"
-      make_block_node "$devno" modem_b
+      make_block_node "$devno" "$partname"
       return 0
     fi
   done
 
-  if [ -r /sys/class/block/sde30/dev ]; then
-    devno="$(cat /sys/class/block/sde30/dev)"
-    make_block_node "$devno" modem_b
+  if [ -n "$fallback" ] && [ -r "/sys/class/block/$fallback/dev" ]; then
+    devno="$(cat "/sys/class/block/$fallback/dev")"
+    make_block_node "$devno" "$partname"
     return 0
   fi
 
   return 1
 }
 
-ensure_symlink() {
+find_modem_b_node() {
+  find_part_node modem_b sde30
+}
+
+ensure_firmware_path() {
   target="$1"
   link="$2"
+  parent="$(dirname "$link")"
+  mkdir -p "$parent"
+
+  if mountpoint -q "$link" 2>/dev/null; then
+    log "$link is already a mountpoint"
+    return 0
+  fi
+
   if [ -L "$link" ] || [ ! -e "$link" ]; then
-    ln -sfn "$target" "$link"
-  else
-    log "$link exists and is not a symlink; leaving it untouched"
+    if ln -sfn "$target" "$link" 2>/tmp/alioth-wifi-link.err; then
+      log "linked $link -> $target"
+      return 0
+    fi
+    log "failed to link $link -> $target: $(cat /tmp/alioth-wifi-link.err 2>/dev/null)"
     return 1
   fi
+
+  if [ -d "$link" ]; then
+    if mount --bind "$target" "$link" 2>/tmp/alioth-wifi-bind.err; then
+      log "bind-mounted $target on existing directory $link"
+      return 0
+    fi
+    log "failed to bind-mount $target on $link: $(cat /tmp/alioth-wifi-bind.err 2>/dev/null)"
+    return 1
+  fi
+
+  log "$link exists and is neither a symlink nor directory; leaving it untouched"
+  return 1
 }
 
 mkdir -p "$FW_MNT" /lib/firmware /lib/firmware/wlan/qca_cld /vendor /firmware
@@ -66,26 +94,109 @@ else
   log "$FW_MNT already mounted"
 fi
 
-ensure_symlink "$FW_MNT/image/qca6390" /lib/firmware/qca6390
-ensure_symlink "$FW_MNT" /vendor/firmware_mnt
-ensure_symlink "$FW_MNT/image" /firmware/image
+ensure_firmware_path "$FW_MNT/image/qca6390" /lib/firmware/qca6390
+ensure_firmware_path "$FW_MNT" /vendor/firmware_mnt || true
+ensure_firmware_path "$FW_MNT/image" /firmware/image || true
 
-if [ ! -s /lib/firmware/wlan/qca_cld/WCNSS_qcom_cfg.ini ]; then
-  if [ -s /data/experiments/wifi-fw-overlay/image/wlan/qca_cld/WCNSS_qcom_cfg.ini ]; then
-    cp /data/experiments/wifi-fw-overlay/image/wlan/qca_cld/WCNSS_qcom_cfg.ini \
-      /lib/firmware/wlan/qca_cld/WCNSS_qcom_cfg.ini
-    chmod 0644 /lib/firmware/wlan/qca_cld/WCNSS_qcom_cfg.ini
-    log "restored WCNSS_qcom_cfg.ini from /data experiment overlay"
-  else
-    log "missing /lib/firmware/wlan/qca_cld/WCNSS_qcom_cfg.ini"
-    exit 3
+mkdir -p /mnt/vendor/persist
+if ! mountpoint -q /mnt/vendor/persist 2>/dev/null; then
+  if persist_node="$(find_part_node persist "")"; then
+    mount -o ro "$persist_node" /mnt/vendor/persist 2>/dev/null && \
+      log "mounted persist at /mnt/vendor/persist from $persist_node" || true
   fi
 fi
 
+if [ ! -s /lib/firmware/wlan/qca_cld/WCNSS_qcom_cfg.ini ]; then
+  for cfg in \
+    /data/experiments/wifi-fw-overlay/image/wlan/qca_cld/WCNSS_qcom_cfg.ini \
+    /vendor/etc/wifi/qca6390/WCNSS_qcom_cfg.ini \
+    /vendor/firmware/wlan/qca_cld/qca6390/WCNSS_qcom_cfg.ini \
+    /vendor/etc/wifi/WCNSS_qcom_cfg.ini \
+    /vendor/firmware/wlan/qca_cld/WCNSS_qcom_cfg.ini; do
+    [ -s "$cfg" ] || continue
+    cp "$cfg" /lib/firmware/wlan/qca_cld/WCNSS_qcom_cfg.ini
+    chmod 0644 /lib/firmware/wlan/qca_cld/WCNSS_qcom_cfg.ini
+    log "restored WCNSS_qcom_cfg.ini from $cfg"
+    break
+  done
+fi
+
+if [ ! -s /lib/firmware/wlan/qca_cld/wlan_mac.bin ]; then
+  for mac in \
+    /mnt/vendor/persist/wlan_mac.bin \
+    /data/experiments/wifi-fw-overlay/image/wlan/qca_cld/wlan_mac.bin \
+    /vendor/firmware/wlan/qca_cld/qca6390/wlan_mac.bin \
+    /vendor/firmware/wlan/qca_cld/wlan_mac.bin; do
+    [ -s "$mac" ] || continue
+    cp "$mac" /lib/firmware/wlan/qca_cld/wlan_mac.bin
+    chmod 0644 /lib/firmware/wlan/qca_cld/wlan_mac.bin
+    log "restored wlan_mac.bin from $mac"
+    break
+  done
+fi
+
+ensure_android_runtime_apex() {
+  [ -x /apex/com.android.runtime/bin/linker64 ] && return 0
+  apex_src=/system/apex/com.android.runtime.apex
+  work=/run/alioth-apex-runtime
+  root="$work/root"
+  payload="$work/apex_payload.img"
+
+  [ -f "$apex_src" ] || return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  command -v debugfs >/dev/null 2>&1 || return 1
+
+  rm -rf "$work"
+  mkdir -p "$root" /apex/com.android.runtime
+  python3 - "$apex_src" "$work" <<'PY'
+import sys
+import zipfile
+
+apex, out_dir = sys.argv[1], sys.argv[2]
+with zipfile.ZipFile(apex) as zf:
+    zf.extract("apex_payload.img", out_dir)
+PY
+  debugfs -R "rdump / $root" "$payload" >/tmp/alioth-apex-debugfs.out 2>/tmp/alioth-apex-debugfs.err || {
+    log "failed to extract Android runtime APEX: $(cat /tmp/alioth-apex-debugfs.err 2>/dev/null)"
+    return 1
+  }
+  if mountpoint -q /apex/com.android.runtime 2>/dev/null; then
+    log "Android runtime APEX is already mounted"
+  elif mount --bind "$root" /apex/com.android.runtime 2>/tmp/alioth-apex-bind.err; then
+    log "materialized Android runtime APEX from $apex_src"
+  else
+    log "failed to bind Android runtime APEX: $(cat /tmp/alioth-apex-bind.err 2>/dev/null)"
+    return 1
+  fi
+  [ -x /apex/com.android.runtime/bin/linker64 ]
+}
+
+ensure_android_runtime_apex || true
+
+android_linker=
+android_qrtr=
+android_cnss=
+if [ -x /vendor/bin/qrtr-ns ] && [ -x /vendor/bin/cnss-daemon ]; then
+  if [ -x /system/bin/linker64 ]; then
+    android_linker=/system/bin/linker64
+  elif [ -x /apex/com.android.runtime/bin/linker64 ]; then
+    android_linker=/apex/com.android.runtime/bin/linker64
+  fi
+  if [ -n "$android_linker" ]; then
+    android_qrtr=/vendor/bin/qrtr-ns
+    android_cnss=/vendor/bin/cnss-daemon
+  fi
+fi
+if [ -z "$android_linker" ]; then
+  android_linker="$RUNTIME/apex/com.android.runtime/bin/linker64"
+  android_qrtr="$RUNTIME/vendor/bin/qrtr-ns"
+  android_cnss="$RUNTIME/vendor/bin/cnss-daemon"
+fi
+
 for required in \
-  "$RUNTIME/apex/com.android.runtime/bin/linker64" \
-  "$RUNTIME/vendor/bin/qrtr-ns" \
-  "$RUNTIME/vendor/bin/cnss-daemon" \
+  "$android_linker" \
+  "$android_qrtr" \
+  "$android_cnss" \
   /lib/firmware/qca6390/amss20.bin \
   /lib/firmware/qca6390/bd_k11a.elf \
   /lib/firmware/qca6390/m3.bin \

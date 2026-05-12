@@ -6,8 +6,7 @@ Before=alioth-wifi-bringup.service
 
 [Service]
 Type=simple
-Environment=LD_LIBRARY_PATH=/data/experiments/android-cnss-runtime/vendor/lib64:/data/experiments/android-cnss-runtime/system/lib64:/data/experiments/android-cnss-runtime/system/lib64/bootstrap
-ExecStart=/data/experiments/android-cnss-runtime/apex/com.android.runtime/bin/linker64 /data/experiments/android-cnss-runtime/vendor/bin/cnss-daemon -n -l -d -d
+ExecStart=/usr/local/sbin/alioth-android-daemon /vendor/bin/cnss-daemon -n -l -d -d
 Restart=on-failure
 RestartSec=1
 
