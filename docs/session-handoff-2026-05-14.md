@@ -112,6 +112,26 @@ codex-cli 0.130.0
 ark-helper 1.2.17
 ```
 
+Claude Code runs as `root` on this phone. Do not set
+`permissions.defaultMode=bypassPermissions` in `/root/.claude/settings.json`;
+Claude rejects that mode for root/sudo sessions with:
+
+```text
+--dangerously-skip-permissions cannot be used with root/sudo privileges for security reasons
+```
+
+Current root-safe settings keep the Bash allow list but use:
+
+```json
+{
+  "permissions": {
+    "defaultMode": "default"
+  },
+  "language": "中文",
+  "autoUpdatesChannel": "stable"
+}
+```
+
 Mihomo is installed as a system service:
 
 ```sh
