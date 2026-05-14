@@ -6,213 +6,651 @@
   <title>Redmi K40 Build Panel</title>
   <style>
     :root {
-      --bg: #11140f;
-      --panel: #1b2118;
-      --panel-2: #222a1e;
-      --ink: #f0ead6;
-      --muted: #a9b097;
-      --line: #3b4632;
-      --green: #9ed46a;
-      --amber: #f0b35a;
-      --red: #e9745f;
-      --blue: #7db4d8;
+      --bg: #0f1216;
+      --surface: #171b21;
+      --surface-2: #1e242c;
+      --field: #10141a;
+      --line: #303946;
+      --line-soft: #242b35;
+      --ink: #eef2f6;
+      --muted: #9ba7b4;
+      --faint: #74808d;
+      --ok: #63c174;
+      --warn: #d8a24d;
+      --bad: #e1695f;
+      --info: #66a9db;
+      --focus: #7bb7e7;
     }
+
     * { box-sizing: border-box; }
+
     body {
       margin: 0;
       min-height: 100vh;
       color: var(--ink);
-      font-family: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
-      background:
-        radial-gradient(circle at 20% 0%, rgba(158, 212, 106, 0.18), transparent 32rem),
-        linear-gradient(135deg, #11140f 0%, #171c14 42%, #0e120c 100%);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
     }
-    header {
-      padding: 28px clamp(18px, 4vw, 48px) 16px;
-      border-bottom: 1px solid var(--line);
-    }
-    h1 {
-      margin: 0;
-      font-size: clamp(24px, 3vw, 42px);
-      letter-spacing: -0.05em;
-    }
-    .sub {
-      margin-top: 8px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-    main {
-      display: grid;
-      grid-template-columns: minmax(300px, 430px) 1fr;
-      gap: 18px;
-      padding: 18px clamp(18px, 4vw, 48px) 36px;
-    }
-    .card {
-      background: linear-gradient(180deg, rgba(34, 42, 30, 0.96), rgba(27, 33, 24, 0.96));
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
-      overflow: hidden;
-    }
-    .card h2 {
-      margin: 0;
-      padding: 16px 18px 12px;
-      font-size: 14px;
-      color: var(--green);
-      border-bottom: 1px solid var(--line);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-    .body { padding: 16px 18px 18px; }
-    .stack { display: grid; gap: 14px; }
-    label {
-      display: grid;
-      gap: 7px;
-      color: var(--muted);
-      font-size: 12px;
-    }
-    input, select {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 11px 12px;
-      color: var(--ink);
-      background: #10150d;
-      outline: none;
+
+    button, input, select {
       font: inherit;
     }
-    input:focus, select:focus { border-color: var(--green); }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .check {
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: end;
+      padding: 18px clamp(16px, 3vw, 36px);
+      border-bottom: 1px solid var(--line);
+      background: #11161c;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .sub {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      background: #151a20;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--faint);
+      flex: 0 0 auto;
+    }
+
+    .dot.ok { background: var(--ok); }
+    .dot.warn { background: var(--warn); }
+    .dot.bad { background: var(--bad); }
+    .dot.info { background: var(--info); }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+      gap: 16px;
+      padding: 16px clamp(16px, 3vw, 36px) 28px;
+    }
+
+    .column {
+      display: grid;
+      gap: 16px;
+      align-content: start;
+      min-width: 0;
+    }
+
+    .section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .section-head {
       display: flex;
       align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 44px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line-soft);
+      background: #151a20;
+    }
+
+    .section h2 {
+      margin: 0;
+      font-size: 13px;
+      letter-spacing: 0;
+      color: var(--ink);
+      font-weight: 650;
+    }
+
+    .body {
+      padding: 14px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 12px;
+    }
+
+    label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    input, select {
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--ink);
+      background: var(--field);
+      outline: none;
+    }
+
+    input:focus, select:focus {
+      border-color: var(--focus);
+      box-shadow: 0 0 0 2px rgba(123, 183, 231, 0.18);
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .check {
+      display: flex;
+      align-items: flex-start;
       gap: 9px;
       color: var(--ink);
       font-size: 13px;
+      line-height: 1.35;
     }
-    .check input { width: auto; }
+
+    .check input {
+      width: 16px;
+      min-height: 16px;
+      margin-top: 1px;
+      flex: 0 0 auto;
+    }
+
+    .help {
+      color: var(--faint);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .branch-preview {
+      display: grid;
+      gap: 6px;
+      padding: 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: #12171d;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .branch-line {
+      display: grid;
+      grid-template-columns: 86px minmax(0, 1fr);
+      gap: 8px;
+      align-items: baseline;
+    }
+
+    .branch-line b {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .branch-line span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    }
+
+    .branch-state {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 2px;
+      color: var(--muted);
+    }
+
+    .branch-state.warn { color: var(--warn); }
+    .branch-state.ok { color: var(--ok); }
+    .branch-state.bad { color: var(--bad); }
+
     button {
-      border: 0;
-      border-radius: 12px;
-      padding: 12px 14px;
+      min-height: 38px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 8px 12px;
       cursor: pointer;
-      color: #10150d;
-      background: var(--green);
-      font: inherit;
+      color: #0d1217;
+      background: var(--ok);
       font-weight: 700;
     }
-    button.secondary { background: var(--amber); }
+
+    button.secondary {
+      background: var(--info);
+    }
+
     button.ghost {
       color: var(--ink);
       background: transparent;
-      border: 1px solid var(--line);
+      border-color: var(--line);
+      font-weight: 600;
     }
-    .facts {
+
+    button:disabled {
+      cursor: not-allowed;
+      color: var(--faint);
+      background: #202733;
+      border-color: var(--line);
+    }
+
+    .msg {
+      min-height: 20px;
+      color: var(--warn);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .metrics {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 10px;
     }
-    .fact {
-      padding: 12px;
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      background: rgba(16, 21, 13, 0.7);
+
+    .metric {
+      min-height: 76px;
+      padding: 11px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: var(--surface-2);
       min-width: 0;
     }
-    .fact b {
+
+    .metric b {
       display: block;
+      margin-bottom: 8px;
       color: var(--muted);
       font-size: 11px;
-      margin-bottom: 6px;
+      font-weight: 600;
     }
-    .fact span {
+
+    .metric span {
       display: block;
-      white-space: nowrap;
+      overflow-wrap: anywhere;
+      color: var(--ink);
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.15;
+    }
+
+    .kv {
+      display: grid;
+      gap: 1px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .kv-row {
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr);
+      gap: 12px;
+      min-height: 34px;
+      align-items: center;
+      padding: 7px 10px;
+      background: #151a20;
+      font-size: 13px;
+    }
+
+    .kv-row:nth-child(even) {
+      background: #13181e;
+    }
+
+    .kv-row b {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .kv-row span {
       overflow: hidden;
       text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
     }
-    .task {
+
+    .dirty-list {
       display: grid;
-      grid-template-columns: auto 1fr auto;
+      gap: 6px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line-soft);
+      color: var(--warn);
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .task-list {
+      display: grid;
+      gap: 6px;
+    }
+
+    .pipeline-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: 10px minmax(0, 1fr) auto;
       gap: 10px;
       align-items: center;
-      padding: 10px 0;
-      border-bottom: 1px solid rgba(59, 70, 50, 0.7);
+      min-height: 68px;
+      padding: 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: #14191f;
       cursor: pointer;
     }
-    .task:last-child { border-bottom: 0; }
-    .pill {
+
+    .pipeline:hover {
+      border-color: #455366;
+    }
+
+    .pipeline.selected {
+      border-color: var(--focus);
+      box-shadow: inset 3px 0 0 var(--focus);
+    }
+
+    .pipeline-main {
+      min-width: 0;
+    }
+
+    .pipeline-title {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 700;
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    }
+
+    .pipeline-meta {
+      display: block;
+      margin-top: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .pipeline-actions {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+    }
+
+    .download-link {
+      min-height: 26px;
       display: inline-flex;
       align-items: center;
-      border-radius: 999px;
-      padding: 4px 8px;
-      font-size: 11px;
-      color: #10150d;
-      background: var(--blue);
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--info);
+      background: #12171d;
+      font-size: 12px;
+      text-decoration: none;
+      white-space: nowrap;
     }
-    .pill.running, .pill.queued { background: var(--amber); }
-    .pill.success { background: var(--green); }
-    .pill.failed, .pill.stale { background: var(--red); }
+
+    .download-link:hover {
+      border-color: var(--info);
+    }
+
+    .task {
+      display: grid;
+      grid-template-columns: 10px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      min-height: 58px;
+      padding: 9px 10px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: #14191f;
+      cursor: pointer;
+    }
+
+    .task:hover {
+      border-color: #455366;
+    }
+
+    .task.selected {
+      border-color: var(--focus);
+      box-shadow: inset 3px 0 0 var(--focus);
+    }
+
+    .task-main {
+      min-width: 0;
+    }
+
+    .task-title {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .task-meta {
+      display: block;
+      margin-top: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .task-code {
+      color: var(--faint);
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .artifact {
+      display: grid;
+      gap: 8px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .artifact:last-child { border-bottom: 0; }
+
+    .artifact-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .artifact-title b {
+      overflow-wrap: anywhere;
+      font-size: 13px;
+    }
+
+    .artifact-title span {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .files {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .file {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      padding: 0 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #12171d;
+      color: var(--info);
+      font-size: 12px;
+      text-decoration: none;
+    }
+
+    .file:hover {
+      border-color: var(--info);
+    }
+
+    .log-panel {
+      min-height: calc(100vh - 118px);
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .log-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--line-soft);
+      background: #151a20;
+    }
+
+    .log-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .log-tools {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex: 0 0 auto;
+    }
+
     pre {
       margin: 0;
-      min-height: 420px;
-      max-height: 62vh;
       overflow: auto;
-      padding: 16px;
-      color: #d9e5c3;
-      background: #090c08;
-      border-top: 1px solid var(--line);
+      padding: 14px;
+      color: #d7e1ec;
+      background: #080b0f;
+      font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
       font-size: 12px;
       line-height: 1.45;
       white-space: pre-wrap;
     }
-    .artifact {
-      padding: 12px 0;
-      border-bottom: 1px solid rgba(59, 70, 50, 0.7);
+
+    .empty {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
     }
-    .artifact:last-child { border-bottom: 0; }
-    a { color: var(--green); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .files {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 8px;
+
+    @media (max-width: 1040px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+      .log-panel {
+        min-height: 560px;
+      }
     }
-    .file {
-      padding: 6px 8px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: rgba(16, 21, 13, 0.7);
-      font-size: 12px;
-    }
-    .msg {
-      min-height: 18px;
-      color: var(--amber);
-      font-size: 12px;
-    }
-    @media (max-width: 920px) {
-      main { grid-template-columns: 1fr; }
-      .facts { grid-template-columns: 1fr; }
+
+    @media (max-width: 680px) {
+      header {
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
+      .header-actions {
+        justify-content: flex-start;
+      }
+      .row, .metrics {
+        grid-template-columns: 1fr;
+      }
+      .kv-row {
+        grid-template-columns: 1fr;
+        gap: 3px;
+      }
+      .log-toolbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
     }
   </style>
 </head>
 <body>
   <header>
-    <h1>Redmi K40 Build Panel</h1>
-    <div class="sub">受控同步、编译、日志和产物下载。默认建议通过 SSH tunnel 访问。</div>
+    <div>
+      <h1>Redmi K40 Build Panel</h1>
+      <div class="sub">远端编译机控制台。默认走 SSH tunnel；页面只负责 sync/build、日志和产物，不负责刷机。</div>
+    </div>
+    <div class="header-actions">
+      <span class="tag"><span class="dot info"></span><span id="panelTarget">panel</span></span>
+      <span class="tag"><span class="dot warn"></span>fastboot boot only</span>
+      <span class="tag"><span class="dot" id="refreshDot"></span><span id="lastUpdated">not loaded</span></span>
+    </div>
   </header>
+
   <main>
-    <section class="stack">
-      <div class="card">
-        <h2>Build Control</h2>
+    <section class="column">
+      <div class="section">
+        <div class="section-head">
+          <h2>Build Control</h2>
+          <span class="tag"><span class="dot" id="activeDot"></span><span id="activeLabel">idle</span></span>
+        </div>
         <div class="body stack">
           <label>Project
             <select id="project"></select>
           </label>
-          <label>Branch
-            <input id="branch" value="" placeholder="lineage-20-headless" autocomplete="off">
+          <label>Pipeline
+            <select id="pipeline"></select>
           </label>
+          <label>Branch
+            <input id="branch" value="" list="branchOptions" placeholder="lineage-20-headless" autocomplete="off">
+            <datalist id="branchOptions"></datalist>
+          </label>
+          <div class="branch-preview" id="branchPreview"></div>
           <div class="row">
             <label>Jobs
               <input id="jobs" type="number" min="1" max="72" value="36">
@@ -226,12 +664,13 @@
           </div>
           <label class="check">
             <input id="systemd" type="checkbox" checked>
-            Include systemd-friendly config fragment
+            <span>Include systemd-friendly config fragment</span>
           </label>
           <label class="check">
             <input id="clean" type="checkbox">
-            Clean build: remove output directory before compiling
+            <span>Clean build: remove output directory before compiling</span>
           </label>
+          <div class="help">Clean build 会放弃当前 out 增量缓存；日常调试默认用 incremental。</div>
           <div class="row">
             <button id="syncBtn" class="secondary">Sync</button>
             <button id="buildBtn">Build</button>
@@ -240,37 +679,89 @@
         </div>
       </div>
 
-      <div class="card">
-        <h2>Status</h2>
+      <div class="section">
+        <div class="section-head">
+          <h2>Pipelines</h2>
+          <span class="tag"><span id="pipelineCount">0</span> branches</span>
+        </div>
         <div class="body">
-          <div class="facts" id="facts"></div>
+          <div class="pipeline-list" id="pipelines"></div>
         </div>
       </div>
 
-      <div class="card">
-        <h2>Tasks</h2>
-        <div class="body" id="tasks"></div>
+      <div class="section">
+        <div class="section-head">
+          <h2>Pipeline Tasks</h2>
+          <button class="ghost" id="latestBtn">Latest</button>
+        </div>
+        <div class="body">
+          <div class="task-list" id="tasks"></div>
+        </div>
       </div>
 
-      <div class="card">
-        <h2>Artifacts</h2>
+      <div class="section">
+        <div class="section-head">
+          <h2>Pipeline Artifacts</h2>
+          <span class="tag"><span id="artifactCount">0</span> dirs</span>
+        </div>
         <div class="body" id="artifacts"></div>
       </div>
     </section>
 
-    <section class="card">
-      <h2>Log Tail</h2>
-      <pre id="log">No task selected.</pre>
+    <section class="column">
+      <div class="section">
+        <div class="section-head">
+          <h2>Builder Status</h2>
+          <span class="tag"><span class="dot" id="repoDot"></span><span id="repoLabel">repo</span></span>
+        </div>
+        <div class="body stack">
+          <div class="metrics" id="metrics"></div>
+          <div class="kv" id="facts"></div>
+          <div class="dirty-list" id="dirtyFiles" hidden></div>
+        </div>
+      </div>
+
+      <div class="section log-panel">
+        <div class="log-toolbar">
+          <div class="log-title" id="logTitle">No task selected.</div>
+          <div class="log-tools">
+            <label class="check" title="Keep the log view pinned to the newest output">
+              <input id="autoScroll" type="checkbox" checked>
+              <span>Auto scroll</span>
+            </label>
+            <button class="ghost" id="refreshBtn">Refresh</button>
+          </div>
+        </div>
+        <pre id="log">No task selected.</pre>
+      </div>
     </section>
   </main>
 
   <script>
     let selectedTask = null;
+    let selectedTaskData = null;
+    let selectedPipeline = null;
+    let hasActiveTask = false;
+    let currentStatus = null;
 
     const $ = (id) => document.getElementById(id);
 
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
     function setMessage(text) {
       $("message").textContent = text || "";
+    }
+
+    function setDot(id, tone) {
+      const dot = $(id);
+      dot.className = "dot" + (tone ? ` ${tone}` : "");
     }
 
     async function api(path, options = {}) {
@@ -284,15 +775,254 @@
     }
 
     function fmtSize(bytes) {
+      if (bytes === null || bytes === undefined) return "unknown";
       if (bytes > 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + " MB";
       if (bytes > 1024) return (bytes / 1024).toFixed(1) + " KB";
       return bytes + " B";
     }
 
+    function fmtTime(value) {
+      if (!value) return "unknown";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return date.toLocaleString();
+    }
+
+    function baseName(path) {
+      if (!path) return "";
+      return String(path).split("/").filter(Boolean).pop() || "";
+    }
+
+    function selectedBranch() {
+      return ($("branch").value || selectedPipeline || currentStatus?.default_branch || "").trim();
+    }
+
+    function safeBranchForQuery() {
+      const branch = selectedBranch();
+      if (!/^[A-Za-z0-9._/@-]{1,96}$/.test(branch)) return "";
+      if (branch.startsWith("-") || branch.endsWith("/") || branch.includes("..") || branch.includes("//") || branch.includes("@{")) return "";
+      return branch;
+    }
+
+    function artifactName(task) {
+      if (!task || task.kind !== "build") return "";
+      return task.artifact_name || baseName(task.artifact_dir) || `panel-${String(task.branch || "").replaceAll("/", "_")}-${task.id}`;
+    }
+
+    function pipelineTone(pipeline) {
+      const status = pipeline?.latest_task?.status;
+      if (status === "failed" || status === "stale") return "bad";
+      if (status === "running" || status === "queued") return "warn";
+      if (pipeline?.latest_success || status === "success") return "ok";
+      if (pipeline?.current) return "info";
+      return "";
+    }
+
+    function duration(task) {
+      if (!task) return "";
+      const start = task.started_at || task.created_at;
+      const end = task.finished_at || new Date().toISOString();
+      const ms = new Date(end).getTime() - new Date(start).getTime();
+      if (!Number.isFinite(ms) || ms < 0) return "";
+      const sec = Math.round(ms / 1000);
+      if (sec < 90) return `${sec}s`;
+      const min = Math.floor(sec / 60);
+      const rem = sec % 60;
+      if (min < 90) return `${min}m ${rem}s`;
+      const hr = Math.floor(min / 60);
+      return `${hr}h ${min % 60}m`;
+    }
+
+    function statusTone(status) {
+      if (status === "success") return "ok";
+      if (status === "failed" || status === "stale") return "bad";
+      if (status === "running" || status === "queued") return "warn";
+      return "";
+    }
+
+    function statusText(task) {
+      if (!task) return "none";
+      return `#${task.id} ${task.status}`;
+    }
+
+    function renderMetrics(data) {
+      const latest = data.latest_task;
+      const disk = data.disk;
+      const metrics = [
+        ["Active", data.active_task ? `#${data.active_task}` : "idle"],
+        ["Latest", latest ? `#${latest.id} ${latest.status}` : "none"],
+        ["Load", data.loadavg ? data.loadavg.map(x => x.toFixed(2)).join(" / ") : "unknown"],
+        ["Disk Free", disk ? `${disk.available} (${disk.used_percent} used)` : "unknown"]
+      ];
+      $("metrics").innerHTML = metrics.map(([k, v]) =>
+        `<div class="metric"><b>${escapeHtml(k)}</b><span title="${escapeHtml(v)}">${escapeHtml(v)}</span></div>`
+      ).join("");
+    }
+
+    function renderFacts(data) {
+      const image = data.builder_image ? data.builder_image.split(" ")[0] : "missing";
+      const facts = [
+        ["Current branch", data.branch || "unknown"],
+        ["HEAD", data.head || "unknown"],
+        ["Dirty files", String(data.dirty_count)],
+        ["Builder image", image],
+        ["CPU cores", String(data.cpu_count || "unknown")],
+        ["Build procs", String(data.build_processes || "0")],
+        ["Object files", String(data.object_count ?? "unknown")],
+        ["Out size", data.out_size || "unknown"],
+        ["Kernel dir", data.kernel_dir],
+        ["Artifact root", data.artifact_root]
+      ];
+      $("facts").innerHTML = facts.map(([k, v]) =>
+        `<div class="kv-row"><b>${escapeHtml(k)}</b><span title="${escapeHtml(v)}">${escapeHtml(v)}</span></div>`
+      ).join("");
+
+      const dirty = data.dirty_files || [];
+      $("dirtyFiles").hidden = dirty.length === 0;
+      $("dirtyFiles").innerHTML = dirty.length
+        ? `<div>Dirty repo preview</div>${dirty.map(item => `<div>${escapeHtml(item)}</div>`).join("")}`
+        : "";
+    }
+
+    function renderBranchOptions(data) {
+      const options = $("branchOptions");
+      const branches = data.branches || [];
+      options.innerHTML = branches
+        .map(name => `<option value="${escapeHtml(name)}"></option>`)
+        .join("");
+    }
+
+    function renderPipelineSelect(data) {
+      const select = $("pipeline");
+      const pipelines = data.pipelines || [];
+      const target = selectedBranch() || data.default_branch || data.branch || "";
+      const hasTarget = pipelines.some(p => p.branch === target);
+      const options = [];
+      if (target && !hasTarget) {
+        options.push(`<option value="${escapeHtml(target)}">${escapeHtml(target)} · custom</option>`);
+      }
+      for (const p of pipelines) {
+        const labels = [];
+        if (p.current) labels.push("current");
+        if (p.default) labels.push("default");
+        if (p.latest_task) labels.push(p.latest_task.status);
+        if (!p.latest_task && p.artifact_count) labels.push(`${p.artifact_count} artifacts`);
+        const suffix = labels.length ? ` · ${labels.join(" · ")}` : "";
+        options.push(`<option value="${escapeHtml(p.branch)}">${escapeHtml(p.branch + suffix)}</option>`);
+      }
+      select.innerHTML = options.join("");
+      if (target) select.value = target;
+    }
+
+    function renderPipelines(data) {
+      const pipelines = data.pipelines || [];
+      $("pipelineCount").textContent = String(pipelines.length);
+      if (!selectedPipeline) {
+        selectedPipeline = ($("branch").value || data.default_branch || data.branch || "").trim();
+      }
+      $("pipelines").innerHTML = pipelines.map((p, index) => {
+        const selected = selectedPipeline === p.branch ? " selected" : "";
+        const tone = pipelineTone(p);
+        const task = p.latest_task;
+        const success = p.latest_success;
+        const artifact = p.download_artifact || p.latest_artifact?.name || "";
+        const labels = [];
+        if (p.current) labels.push("current");
+        if (p.default) labels.push("default");
+        if (task) labels.push(`#${task.id} ${task.status}`);
+        if (!task && artifact) labels.push("artifact only");
+        if (!task && !artifact) labels.push("no builds yet");
+        const meta = `${labels.join(" · ")}${artifact ? " · " + artifact : ""}`;
+        const download = p.download_url
+          ? `<a class="download-link" href="${p.download_url}" onclick="event.stopPropagation()">Download</a>`
+          : `<span class="tag">no artifact</span>`;
+        return `
+          <div class="pipeline${selected}" onclick="selectPipelineByIndex(${index})">
+            <span class="dot ${tone}"></span>
+            <div class="pipeline-main">
+              <span class="pipeline-title" title="${escapeHtml(p.branch)}">${escapeHtml(p.branch)}</span>
+              <span class="pipeline-meta" title="${escapeHtml(meta)}">${escapeHtml(meta)}</span>
+            </div>
+            <div class="pipeline-actions">
+              ${download}
+            </div>
+          </div>
+        `;
+      }).join("") || "<div class='empty'>No pipelines found.</div>";
+    }
+
+    function updateBranchPreview() {
+      const data = currentStatus || {};
+      const current = data.branch || "unknown";
+      const target = selectedBranch();
+      const mode = $("mode").value;
+      const known = new Set(data.branches || []);
+      const pipeline = (data.pipelines || []).find(p => p.branch === target);
+      let tone = "ok";
+      let text = "Already on target branch.";
+
+      if (!target) {
+        tone = "bad";
+        text = "Target branch is empty.";
+      } else if (target !== current && mode === "build") {
+        tone = "warn";
+        text = "Build only keeps the current checkout; use Sync or Sync then build to switch.";
+      } else if (target !== current) {
+        tone = "warn";
+        text = `This task will switch checkout: ${current} -> ${target}.`;
+      }
+      if (target && known.size && !known.has(target)) {
+        tone = "bad";
+        text = `Branch is not visible in local/origin refs: ${target}.`;
+      }
+
+      const latest = pipeline?.latest_task
+        ? `#${pipeline.latest_task.id} ${pipeline.latest_task.status}`
+        : "none";
+      const artifact = pipeline?.download_artifact || pipeline?.latest_artifact?.name || "none";
+      const download = pipeline?.download_url
+        ? `<a class="download-link" href="${pipeline.download_url}">Download latest bundle</a>`
+        : `<span>${escapeHtml(artifact)}</span>`;
+
+      $("branchPreview").innerHTML = `
+        <div class="branch-line"><b>Current</b><span title="${escapeHtml(current)}">${escapeHtml(current)}</span></div>
+        <div class="branch-line"><b>Target</b><span title="${escapeHtml(target || "none")}">${escapeHtml(target || "none")}</span></div>
+        <div class="branch-line"><b>Default</b><span title="${escapeHtml(data.default_branch || "unknown")}">${escapeHtml(data.default_branch || "unknown")}</span></div>
+        <div class="branch-line"><b>Latest</b><span title="${escapeHtml(latest)}">${escapeHtml(latest)}</span></div>
+        <div class="branch-line"><b>Artifact</b>${download}</div>
+        <div class="branch-state ${tone}"><span class="dot ${tone}"></span><span>${escapeHtml(text)}</span></div>
+      `;
+
+      const branchMismatch = Boolean(target && target !== current && mode === "build");
+      $("syncBtn").disabled = hasActiveTask || !target;
+      $("buildBtn").disabled = hasActiveTask || !target || branchMismatch;
+    }
+
+    function selectPipeline(branch) {
+      selectedPipeline = branch;
+      $("branch").value = branch;
+      $("pipeline").value = branch;
+      updateBranchPreview();
+      if (currentStatus) renderPipelines(currentStatus);
+      refreshTasks()
+        .then(refreshTaskLog)
+        .then(refreshArtifacts)
+        .catch(err => setMessage(err.message));
+    }
+
+    function selectPipelineByIndex(index) {
+      const pipeline = currentStatus?.pipelines?.[index];
+      if (pipeline) selectPipeline(pipeline.branch);
+    }
+
     async function refreshStatus() {
       const data = await api("/api/status");
+      currentStatus = data;
       $("branch").value = $("branch").value || data.default_branch;
       $("jobs").value = $("jobs").value || data.default_jobs;
+      $("panelTarget").textContent = `${data.host}:${data.port}`;
+      $("artifactCount").textContent = String(data.artifact_count ?? 0);
+
       const project = $("project");
       if (!project.options.length) {
         for (const item of data.projects) {
@@ -302,64 +1032,99 @@
           project.appendChild(opt);
         }
       }
-      const facts = [
-        ["Current branch", data.branch || "unknown"],
-        ["HEAD", data.head || "unknown"],
-        ["Dirty files", String(data.dirty_count)],
-        ["Active task", data.active_task || "none"],
-        ["Load avg", data.loadavg ? data.loadavg.map(x => x.toFixed(2)).join(" / ") : "unknown"],
-        ["CPU cores", String(data.cpu_count || "unknown")],
-        ["Build procs", String(data.build_processes || "0")],
-        ["Object files", String(data.object_count ?? "unknown")],
-        ["Out size", data.out_size || "unknown"],
-        ["Latest task", data.latest_task ? `#${data.latest_task.id} ${data.latest_task.status}` : "none"],
-        ["Kernel dir", data.kernel_dir],
-        ["Artifact root", data.artifact_root],
-        ["Builder image", data.builder_image || "missing"],
-        ["Panel", data.host + ":" + data.port]
-      ];
-      $("facts").innerHTML = facts.map(([k, v]) =>
-        `<div class="fact"><b>${k}</b><span title="${String(v)}">${String(v)}</span></div>`
-      ).join("");
+
+      hasActiveTask = Boolean(data.active_task);
+      $("activeLabel").textContent = hasActiveTask ? `task #${data.active_task}` : "idle";
+      setDot("activeDot", hasActiveTask ? "warn" : "ok");
+      setDot("repoDot", data.dirty_count > 0 ? "warn" : "ok");
+      $("repoLabel").textContent = data.dirty_count > 0 ? "dirty repo" : "clean repo";
+      setDot("refreshDot", "ok");
+      $("lastUpdated").textContent = new Date().toLocaleTimeString();
+
+      $("syncBtn").disabled = hasActiveTask;
+      $("buildBtn").disabled = hasActiveTask;
+
+      renderBranchOptions(data);
+      renderPipelineSelect(data);
+      renderPipelines(data);
+      updateBranchPreview();
+      renderMetrics(data);
+      renderFacts(data);
     }
 
     async function refreshTasks() {
-      const data = await api("/api/tasks");
-      $("tasks").innerHTML = data.tasks.map(t => `
-        <div class="task" onclick="selectTask(${t.id})">
-          <span class="pill ${t.status}">${t.status}</span>
-          <div>#${t.id} ${t.kind} ${t.branch} ${t.clean_build ? "clean" : "incremental"}<br><span class="sub">${t.created_at}</span></div>
-          <span>${t.exit_code === null ? "" : t.exit_code}</span>
-        </div>
-      `).join("") || "<div class='sub'>No tasks yet.</div>";
-      if (!selectedTask && data.tasks.length) selectedTask = data.tasks[0].id;
+      const branch = safeBranchForQuery();
+      const data = await api(branch ? `/api/tasks?branch=${encodeURIComponent(branch)}&limit=80` : "/api/tasks?limit=80");
+      if (!data.tasks.some(t => t.id === selectedTask)) {
+        selectedTask = data.tasks.length ? data.tasks[0].id : null;
+      }
+      $("tasks").innerHTML = data.tasks.map(t => {
+        const selected = selectedTask === t.id ? " selected" : "";
+        const tone = statusTone(t.status);
+        const artifact = artifactName(t);
+        const download = t.artifact_bundle_url ? " · bundle ready" : "";
+        const metaParts = [
+          t.branch,
+          t.clean_build ? "clean" : "incremental",
+          duration(t) || fmtTime(t.created_at)
+        ];
+        if (artifact) metaParts.push(artifact);
+        if (download) metaParts.push(download.slice(3));
+        const meta = metaParts.join(" · ");
+        const code = t.exit_code === null ? "" : `exit ${t.exit_code}`;
+        return `
+          <div class="task${selected}" onclick="selectTask(${t.id})">
+            <span class="dot ${tone}"></span>
+            <div class="task-main">
+              <span class="task-title">#${t.id} ${escapeHtml(t.kind)} · ${escapeHtml(t.status)}</span>
+              <span class="task-meta" title="${escapeHtml(meta)}">${escapeHtml(meta)}</span>
+            </div>
+            <span class="task-code">${escapeHtml(code)}</span>
+          </div>
+        `;
+      }).join("") || "<div class='empty'>No tasks yet.</div>";
     }
 
     async function refreshTaskLog() {
-      if (!selectedTask) return;
+      if (!selectedTask) {
+        $("logTitle").textContent = "No task selected.";
+        $("log").textContent = "No task selected.";
+        return;
+      }
       const data = await api(`/api/tasks/${selectedTask}`);
+      selectedTaskData = data.task;
+      const artifact = artifactName(data.task);
+      $("logTitle").textContent = `Task #${data.task.id} · ${data.task.kind} · ${data.task.status} · ${data.task.branch}${artifact ? " · " + artifact : ""}`;
       $("log").textContent = data.task.log_tail || "Log is empty.";
+      if ($("autoScroll").checked) $("log").scrollTop = $("log").scrollHeight;
     }
 
     async function refreshArtifacts() {
-      const data = await api("/api/artifacts");
+      const branch = safeBranchForQuery();
+      const data = await api(branch ? `/api/artifacts?branch=${encodeURIComponent(branch)}` : "/api/artifacts");
+      $("artifactCount").textContent = String(data.artifacts.length);
       $("artifacts").innerHTML = data.artifacts.map(a => `
         <div class="artifact">
-          <div>${a.name}</div>
+          <div class="artifact-title">
+            <b>${escapeHtml(a.name)}</b>
+            <span>${escapeHtml(fmtTime(a.updated_at))}</span>
+          </div>
           <div class="files">
-            ${a.files.map(f => `<a class="file" href="${f.url}">${f.name} ${fmtSize(f.size)}</a>`).join("")}
+            ${a.bundle_url ? `<a class="file" href="${a.bundle_url}">bundle tar.gz</a>` : ""}
+            ${a.files.map(f => `<a class="file" href="${f.url}">${escapeHtml(f.name)} ${escapeHtml(fmtSize(f.size))}</a>`).join("")}
           </div>
         </div>
-      `).join("") || "<div class='sub'>No artifacts yet.</div>";
+      `).join("") || "<div class='empty'>No artifacts yet.</div>";
     }
 
     async function selectTask(id) {
       selectedTask = id;
+      await refreshTasks();
       await refreshTaskLog();
     }
 
     async function submitSync() {
-      setMessage("Sync task submitted...");
+      setMessage("Submitting sync task...");
       const data = await api("/api/sync", {
         method: "POST",
         body: JSON.stringify({
@@ -373,7 +1138,7 @@
     }
 
     async function submitBuild() {
-      setMessage("Build task submitted...");
+      setMessage("Submitting build task...");
       const data = await api("/api/build", {
         method: "POST",
         body: JSON.stringify({
@@ -390,6 +1155,12 @@
       await refreshAll();
     }
 
+    async function selectLatest() {
+      const branch = safeBranchForQuery();
+      const data = await api(branch ? `/api/tasks?branch=${encodeURIComponent(branch)}` : "/api/tasks");
+      if (data.tasks.length) await selectTask(data.tasks[0].id);
+    }
+
     async function refreshAll() {
       try {
         await refreshStatus();
@@ -397,12 +1168,25 @@
         await refreshTaskLog();
         await refreshArtifacts();
       } catch (err) {
+        setDot("refreshDot", "bad");
         setMessage(err.message);
       }
     }
 
     $("syncBtn").addEventListener("click", () => submitSync().catch(err => setMessage(err.message)));
     $("buildBtn").addEventListener("click", () => submitBuild().catch(err => setMessage(err.message)));
+    $("refreshBtn").addEventListener("click", () => refreshAll());
+    $("latestBtn").addEventListener("click", () => selectLatest().catch(err => setMessage(err.message)));
+    $("pipeline").addEventListener("change", () => {
+      selectPipeline($("pipeline").value);
+    });
+    $("branch").addEventListener("input", () => {
+      selectedPipeline = $("branch").value.trim();
+      $("pipeline").value = selectedPipeline;
+      updateBranchPreview();
+      if (currentStatus) renderPipelines(currentStatus);
+    });
+    $("mode").addEventListener("change", updateBranchPreview);
     refreshAll();
     setInterval(refreshAll, 5000);
   </script>

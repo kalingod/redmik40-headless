@@ -1,0 +1,14 @@
+[Unit]
+Description=Alioth Ubuntu thermal guard
+Documentation=file:/usr/local/sbin/alioth-thermal-guard
+After=multi-user.target
+ConditionPathExists=/sys/class/thermal
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/alioth-thermal-guard
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

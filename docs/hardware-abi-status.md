@@ -1,6 +1,6 @@
 # Hardware ABI Status
 
-Last refresh: 2026-05-09 23:36 CST.
+Last refresh: 2026-05-13 20:53 CST.
 
 Current baseline:
 
@@ -9,7 +9,7 @@ DISTRO: Ubuntu 24.04.4 LTS userspace
 PID1:   systemd 255
 KERNEL: Lineage/Android downstream 4.19.312-perf
 ROOT:   /dev/block/by-name/userdata[/rootfs/ubuntu-24.04]
-SLOT:   androidboot.slot_suffix=_b
+SLOT:   androidboot.slot_suffix=_a
 REPORT: /vmdata/android/redmik40/experiments/2026-05-04-ubuntu2404-hw-abi-inventory/report.txt
 INPUT:  /vmdata/android/redmik40/experiments/2026-05-04-ubuntu2404-input-baseline/report.txt
 TOUCH_HAPTIC: /vmdata/android/redmik40/experiments/2026-05-04-ubuntu2404-touch-haptic-smoke/report.txt

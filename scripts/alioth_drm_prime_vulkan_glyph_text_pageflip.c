@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/select.h>
@@ -38,13 +39,17 @@
 #define TEXT_MARGIN_X 96u
 #define TEXT_MARGIN_Y 240u
 #define LINE_HEIGHT (GLYPH_H * TEXT_SCALE + 18u)
-#define MAX_MONITOR_LINES 6u
+#define MAX_MONITOR_LINES 9u
 #define MAX_MONITOR_CHARS 32u
 #define MAX_INPUT_FDS 16u
 #define NORMAL_PAGE_COUNT 4u
 #define POWER_MENU_PAGE 4u
 #define POWER_ACTION_COUNT 4u
 #define BYTES_PER_PIXEL 4u
+#define SCREENSHOT_REQUEST_PATH "/run/alioth-panel-screenshot.request"
+#define SCREENSHOT_BMP_PATH "/run/alioth-panel-screenshot.bmp"
+#define SCREENSHOT_INFO_PATH "/run/alioth-panel-screenshot.txt"
+#define PAGE_REQUEST_PATH "/run/alioth-panel-page"
 
 static char monitor_lines[MAX_MONITOR_LINES][MAX_MONITOR_CHARS];
 static uint32_t monitor_line_count;
@@ -132,6 +137,127 @@ static void handle_signal(int signum)
 {
     (void)signum;
     stop_requested = 1;
+}
+
+static bool write_all_fd(int fd, const void *buf, size_t len)
+{
+    const uint8_t *p = buf;
+
+    while (len > 0) {
+        ssize_t n = write(fd, p, len);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            return false;
+        }
+        if (n == 0)
+            return false;
+        p += n;
+        len -= (size_t)n;
+    }
+
+    return true;
+}
+
+static void put_le16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v & 0xff);
+    p[1] = (uint8_t)((v >> 8) & 0xff);
+}
+
+static void put_le32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v & 0xff);
+    p[1] = (uint8_t)((v >> 8) & 0xff);
+    p[2] = (uint8_t)((v >> 16) & 0xff);
+    p[3] = (uint8_t)((v >> 24) & 0xff);
+}
+
+static bool write_buffer_bmp(const struct drm_buffer *buf, const char *path)
+{
+    int fd;
+    uint8_t header[54];
+    uint8_t *row = NULL;
+    uint32_t row_stride = ((buf->width * 3u + 3u) / 4u) * 4u;
+    uint32_t file_size = 54u + row_stride * buf->height;
+    bool ok = false;
+
+    if (!buf->map || buf->width == 0 || buf->height == 0)
+        return false;
+
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0)
+        return false;
+
+    row = calloc(1, row_stride);
+    if (!row)
+        goto out;
+
+    memset(header, 0, sizeof(header));
+    header[0] = 'B';
+    header[1] = 'M';
+    put_le32(header + 2, file_size);
+    put_le32(header + 10, 54);
+    put_le32(header + 14, 40);
+    put_le32(header + 18, buf->width);
+    put_le32(header + 22, buf->height);
+    put_le16(header + 26, 1);
+    put_le16(header + 28, 24);
+    put_le32(header + 34, row_stride * buf->height);
+    if (!write_all_fd(fd, header, sizeof(header)))
+        goto out;
+
+    for (int y = (int)buf->height - 1; y >= 0; y--) {
+        const uint8_t *src = (const uint8_t *)buf->map + (size_t)y * buf->pitch;
+        memset(row, 0, row_stride);
+        for (uint32_t x = 0; x < buf->width; x++) {
+            row[x * 3u + 0u] = src[x * 4u + 0u];
+            row[x * 3u + 1u] = src[x * 4u + 1u];
+            row[x * 3u + 2u] = src[x * 4u + 2u];
+        }
+        if (!write_all_fd(fd, row, row_stride))
+            goto out;
+    }
+
+    ok = true;
+
+out:
+    free(row);
+    close(fd);
+    return ok;
+}
+
+static void maybe_write_screenshot(const struct drm_buffer *buf,
+                                   unsigned int index,
+                                   unsigned int events)
+{
+    int info_fd;
+    char info[256];
+    int n;
+
+    if (access(SCREENSHOT_REQUEST_PATH, F_OK) != 0)
+        return;
+    unlink(SCREENSHOT_REQUEST_PATH);
+
+    if (!write_buffer_bmp(buf, SCREENSHOT_BMP_PATH)) {
+        fprintf(stderr, "screenshot_write=FAIL path=%s errno=%d %s\n",
+                SCREENSHOT_BMP_PATH, errno, strerror(errno));
+        return;
+    }
+
+    info_fd = open(SCREENSHOT_INFO_PATH, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (info_fd >= 0) {
+        n = snprintf(info, sizeof(info),
+                     "path=%s\nwidth=%u\nheight=%u\npitch=%u\nfb=%u\nbuffer_index=%u\nevents=%u\n",
+                     SCREENSHOT_BMP_PATH, buf->width, buf->height, buf->pitch,
+                     buf->fb_id, index, events);
+        if (n > 0)
+            write_all_fd(info_fd, info, (size_t)n);
+        close(info_fd);
+    }
+
+    printf("screenshot_write=PASS path=%s fb=%u index=%u events=%u\n",
+           SCREENSHOT_BMP_PATH, buf->fb_id, index, events);
 }
 
 static void close_input_devices(struct input_ctx *input)
@@ -1020,6 +1146,77 @@ static void read_net_line(const char *ifname, const char *label,
     snprintf(out, out_size, "%s %s", label, state);
 }
 
+static void read_wifi_state_value(const char *key, const char *fallback,
+                                  char *out, size_t out_size)
+{
+    if (read_key_value("/run/alioth-wifi-state", key, out, out_size))
+        return;
+    snprintf(out, out_size, "%s", fallback);
+}
+
+static void read_wifi_summary_line(char *out, size_t out_size)
+{
+    char mode[64];
+    char link[96];
+
+    read_wifi_state_value("mode=", "unknown", mode, sizeof(mode));
+    read_wifi_state_value("iw_link=", "unknown", link, sizeof(link));
+    if (strncasecmp(link, "Not connected", 13) != 0 &&
+        (strstr(link, "Connected") || strstr(link, "connected")))
+        snprintf(out, out_size, "MODE %s LINKED", mode);
+    else
+        snprintf(out, out_size, "MODE %s", mode);
+}
+
+static void read_wifi_link_line(char *out, size_t out_size)
+{
+    char link[96];
+
+    read_wifi_state_value("iw_link=", "Not connected", link, sizeof(link));
+    snprintf(out, out_size, "LINK %s", link);
+}
+
+static void apply_page_request(void)
+{
+    char page[64];
+
+    if (!read_first_line(PAGE_REQUEST_PATH, page, sizeof(page)))
+        return;
+    unlink(PAGE_REQUEST_PATH);
+
+    if (strcasecmp(page, "monitor") == 0 ||
+        strcasecmp(page, "status") == 0 ||
+        strcmp(page, "0") == 0) {
+        monitor_page = 0;
+        power_action = 0;
+    } else if (strcasecmp(page, "wifi") == 0 ||
+               strcmp(page, "1") == 0) {
+        monitor_page = 1;
+        power_action = 0;
+    } else if (strcasecmp(page, "power") == 0 ||
+               strcmp(page, "2") == 0) {
+        monitor_page = 2;
+        power_action = 0;
+    } else if (strcasecmp(page, "system") == 0 ||
+               strcasecmp(page, "details") == 0 ||
+               strcmp(page, "3") == 0) {
+        monitor_page = 3;
+        power_action = 0;
+    } else if (strcasecmp(page, "menu") == 0) {
+        monitor_page = POWER_MENU_PAGE;
+        power_action = 0;
+    } else if (strcasecmp(page, "next") == 0) {
+        monitor_page = (monitor_page + 1u) % NORMAL_PAGE_COUNT;
+    } else if (strcasecmp(page, "prev") == 0) {
+        monitor_page = (monitor_page + NORMAL_PAGE_COUNT - 1u) % NORMAL_PAGE_COUNT;
+    } else {
+        printf("page_request_unknown=\"%s\"\n", page);
+        return;
+    }
+
+    printf("page_request=\"%s\" page=%u action=%u\n", page, monitor_page, power_action);
+}
+
 static void read_audio_line(char *out, size_t out_size)
 {
     char adsp[32];
@@ -1056,24 +1253,34 @@ static bool prepare_monitor_lines(void)
     struct utsname uts;
 
     memcpy(old_lines, monitor_lines, sizeof(old_lines));
-    monitor_line_count = 6;
+    apply_page_request();
+    monitor_line_count = 9;
 
     switch (monitor_page) {
     case 1:
-        set_monitor_line(0, "", "HARDWARE STACK");
-        set_monitor_line(1, "", "FD650 ADRENO KGSL");
-        set_monitor_line(2, "", "DRM KMS PAGEFLIP");
-        set_monitor_line(3, "", "TOUCH FTS EVDEV");
-        set_monitor_line(4, "", "AUDIO CS35L41 SPK");
-        set_monitor_line(5, "", "WIFI CNSS SCAN OK");
+        set_monitor_line(0, "", "WIFI");
+        read_net_line("wlan0", "WLAN", line, sizeof(line));
+        set_monitor_line(1, "", line);
+        read_wifi_summary_line(line, sizeof(line));
+        set_monitor_line(2, "", line);
+        read_wifi_link_line(line, sizeof(line));
+        set_monitor_line(3, "", line);
+        set_monitor_line(4, "", "SCAN FILE /RUN/PANEL WIFI");
+        set_monitor_line(5, "", "CONNECT UI NOT PORTED");
+        set_monitor_line(6, "", "USE CPU PANEL FOR KEYBOARD");
+        set_monitor_line(7, "", "PAGE REQUEST WIFI OK");
+        set_monitor_line(8, "", "NAV MON WIFI PWR SYS");
         break;
     case 2:
-        set_monitor_line(0, "", "LAUNCHER");
-        set_monitor_line(1, "", "POWER OPENS MENU");
+        set_monitor_line(0, "", "POWER");
+        set_monitor_line(1, "", "POWER KEY OPENS MENU");
         set_monitor_line(2, "", "VOL KEYS SWITCH PAGE");
-        set_monitor_line(3, "", "DESKTOP LABWC READY");
-        set_monitor_line(4, "", "SSH 172.16.42.2");
-        set_monitor_line(5, "", "REBOOT FASTBOOT SAFE");
+        set_monitor_line(3, "", "MENU HAS REBOOT FASTBOOT");
+        set_monitor_line(4, "", "GPU PANEL ACTIVE");
+        set_monitor_line(5, "", "CPU FALLBACK AVAILABLE");
+        set_monitor_line(6, "", "SCREENSHOT REQUEST OK");
+        set_monitor_line(7, "", "SSH 172.16.42.2");
+        set_monitor_line(8, "", "NAV MON WIFI PWR SYS");
         break;
     case POWER_MENU_PAGE:
         set_monitor_line(0, "", "POWER MENU");
@@ -1082,9 +1289,12 @@ static bool prepare_monitor_lines(void)
         set_monitor_line(3, "", "POWER CONFIRM");
         set_monitor_line(4, "", "CANCEL DEFAULT SAFE");
         set_monitor_line(5, "", "DESKTOP REBOOT FASTBOOT");
+        set_monitor_line(6, "", "VOL DOWN PREVIOUS");
+        set_monitor_line(7, "", "REQUEST PAGE POWER");
+        set_monitor_line(8, "", "NAV MON WIFI PWR SYS");
         break;
     default:
-        set_monitor_line(0, "", "ALIOTH RUNTIME");
+        set_monitor_line(0, "", "MONITOR");
         read_systemd_state(systemd, sizeof(systemd));
         read_failed_units(failed, sizeof(failed));
         snprintf(line, sizeof(line), "SYSTEMD %s FAIL %s", systemd, failed);
@@ -1097,9 +1307,12 @@ static bool prepare_monitor_lines(void)
         set_monitor_line(4, "", line);
         read_audio_line(line, sizeof(line));
         set_monitor_line(5, "", line);
+        set_monitor_line(6, "", "GPU KGSL KMS ACTIVE");
+        set_monitor_line(7, "", "SCREENSHOT REQUEST OK");
+        set_monitor_line(8, "", "NAV MON WIFI PWR SYS");
         break;
     case 3:
-        set_monitor_line(0, "", "SYSTEM DETAILS");
+        set_monitor_line(0, "", "SYSTEM");
         read_os_pretty(os, sizeof(os));
         set_monitor_line(1, "", os);
         if (uname(&uts) == 0)
@@ -1110,6 +1323,9 @@ static bool prepare_monitor_lines(void)
         set_monitor_line(3, "SYSTEMD ", systemd);
         set_monitor_line(4, "", "FD650 KGSL VULKAN OK");
         set_monitor_line(5, "", "DRM KMS PAGEFLIP OK");
+        set_monitor_line(6, "", "TOUCH EVDEV OPEN");
+        set_monitor_line(7, "", "CPU UI FALLBACK READY");
+        set_monitor_line(8, "", "NAV MON WIFI PWR SYS");
         break;
     }
 
@@ -2008,6 +2224,101 @@ static void destroy_vulkan(struct vk_ctx *ctx)
         vkDestroyInstance(ctx->instance, NULL);
 }
 
+static int run_vulkan_probe(void)
+{
+    struct vk_ctx vk;
+    VkBuffer buffer = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkMemoryPropertyFlags memory_flags = 0;
+    VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+    const VkDeviceSize size = 4096;
+    const uint32_t pattern = 0xa5a5a5a5u;
+    void *mapped = NULL;
+    int rc = 1;
+
+    memset(&vk, 0, sizeof(vk));
+    if (init_vulkan(&vk) != 0)
+        goto cleanup;
+
+    if (create_buffer(&vk, size,
+                      VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                      &buffer, &memory, &memory_flags) != 0)
+        goto cleanup;
+
+    if (vk_ok(vkMapMemory(vk.device, memory, 0, size, 0, &mapped),
+              "vkMapMemory(probe-zero)") != 0)
+        goto cleanup;
+    memset(mapped, 0, (size_t)size);
+    vkUnmapMemory(vk.device, memory);
+    mapped = NULL;
+
+    VkCommandBufferAllocateInfo cmd_alloc = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .commandPool = vk.command_pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1,
+    };
+    if (vk_ok(vkAllocateCommandBuffers(vk.device, &cmd_alloc, &command_buffer),
+              "vkAllocateCommandBuffers(probe)") != 0)
+        goto cleanup;
+
+    VkCommandBufferBeginInfo begin = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+    };
+    if (vk_ok(vkBeginCommandBuffer(command_buffer, &begin),
+              "vkBeginCommandBuffer(probe)") != 0)
+        goto cleanup;
+    vkCmdFillBuffer(command_buffer, buffer, 0, size, pattern);
+    if (vk_ok(vkEndCommandBuffer(command_buffer),
+              "vkEndCommandBuffer(probe)") != 0)
+        goto cleanup;
+
+    VkSubmitInfo submit = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &command_buffer,
+    };
+    if (vk_ok(vkQueueSubmit(vk.queue, 1, &submit, VK_NULL_HANDLE),
+              "vkQueueSubmit(probe)") != 0)
+        goto cleanup;
+    if (vk_ok(vkQueueWaitIdle(vk.queue), "vkQueueWaitIdle(probe)") != 0)
+        goto cleanup;
+    printf("gpu_probe_submit=PASS bytes=%llu pattern=0x%08x\n",
+           (unsigned long long)size, pattern);
+
+    if (vk_ok(vkMapMemory(vk.device, memory, 0, size, 0, &mapped),
+              "vkMapMemory(probe-check)") != 0)
+        goto cleanup;
+    uint32_t *words = mapped;
+    for (size_t i = 0; i < (size_t)size / sizeof(uint32_t); i++) {
+        if (words[i] != pattern) {
+            fprintf(stderr, "gpu_probe_verify=FAIL word=%zu got=0x%08x want=0x%08x\n",
+                    i, words[i], pattern);
+            goto cleanup;
+        }
+    }
+    printf("gpu_probe_verify=PASS words=%zu pattern=0x%08x\n",
+           (size_t)size / sizeof(uint32_t), pattern);
+    printf("alioth_gpu_probe=PASS\n");
+    rc = 0;
+
+cleanup:
+    if (mapped)
+        vkUnmapMemory(vk.device, memory);
+    if (command_buffer)
+        vkFreeCommandBuffers(vk.device, vk.command_pool, 1, &command_buffer);
+    if (buffer)
+        vkDestroyBuffer(vk.device, buffer, NULL);
+    if (memory)
+        vkFreeMemory(vk.device, memory, NULL);
+    destroy_vulkan(&vk);
+    return rc;
+}
+
 static int check_external_format(struct vk_ctx *ctx, const struct drm_buffer *buf)
 {
     VkPhysicalDeviceExternalImageFormatInfo ext_format = {
@@ -2431,6 +2742,7 @@ int main(int argc, char **argv)
     int shader_arg = 2;
     int fd = -1;
     int rc = 1;
+    unsigned int current = 0;
     struct drm_target target;
     struct drm_buffer buffers[2];
     struct imported_image images[2];
@@ -2454,6 +2766,8 @@ int main(int argc, char **argv)
             service_mode = true;
             flips = 0;
             shader_arg = 2;
+        } else if (strcmp(argv[1], "probe") == 0 || strcmp(argv[1], "kgsl-probe") == 0) {
+            return run_vulkan_probe();
         } else {
             flips = (unsigned int)strtoul(argv[1], NULL, 10);
             shader_arg = 2;
@@ -2464,7 +2778,7 @@ int main(int argc, char **argv)
     if (argc >= shader_arg + 2)
         frag_path = argv[shader_arg + 1];
     if ((!service_mode && (flips < 1 || flips > 60)) || (argc >= 2 && flips == 0 && !service_mode)) {
-        fprintf(stderr, "usage: %s [flips 1..60|monitor] [vert.spv] [frag.spv]\n", argv[0]);
+        fprintf(stderr, "usage: %s [flips 1..60|monitor|probe] [vert.spv] [frag.spv]\n", argv[0]);
         return 2;
     }
 
@@ -2520,6 +2834,7 @@ int main(int argc, char **argv)
         goto cleanup;
     }
     printf("initial_set_crtc=PASS fb=%u\n", buffers[0].fb_id);
+    maybe_write_screenshot(&buffers[current], current, flip.seen);
     if (service_mode)
         open_input_devices(&input);
 
@@ -2549,6 +2864,8 @@ int main(int argc, char **argv)
                    i, buffers[next].fb_id, service_mode ? "yes" : "no");
         if (wait_for_flip(fd, &flip) != 0)
             goto cleanup;
+        current = next;
+        maybe_write_screenshot(&buffers[current], current, flip.seen);
 
         struct timespec pause = service_mode ?
             (struct timespec){ .tv_sec = 1, .tv_nsec = 0 } :

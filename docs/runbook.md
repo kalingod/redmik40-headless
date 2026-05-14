@@ -614,6 +614,36 @@ tail -80 /run/alioth-status-ui.log
 tail -80 /tmp/alioth-status-ui-c.log
 ```
 
+## Thermal Guard
+
+Ubuntu does not start Android init services such as Xiaomi `mi_thermald` or the
+QTI thermal profile stack. Keep `alioth-thermal-guard.service` enabled before
+long CPU/GPU/compile runs:
+
+```sh
+systemctl status alioth-thermal-guard.service --no-pager
+cat /run/alioth-thermal-guard.status
+journalctl -u alioth-thermal-guard.service -n 80 --no-pager
+```
+
+Installed paths:
+
+```text
+/usr/local/sbin/alioth-thermal-guard
+/etc/systemd/system/alioth-thermal-guard.service
+/run/alioth-thermal-guard.status
+/var/log/alioth-thermal-guard.log
+```
+
+Default policy:
+
+```text
+warm:     battery 40C / CPU 60C / GPU 60C / PMIC 65C -> schedutil
+hot:      battery 42C / CPU 70C / GPU 70C / PMIC 80C -> powersave
+critical: battery 48C / CPU 85C / GPU 85C / PMIC 95C -> powersave
+shutdown: battery 55C / CPU 105C / GPU 105C / PMIC 115C -> systemctl poweroff
+```
+
 ## Ubuntu 硬件 ABI 盘点
 
 主机侧执行只读盘点：
@@ -1509,28 +1539,57 @@ init shebang 和 /bin/busybox 路径
 尽量用最小 patch 修改原始 ramdisk，或先加 pre-switch diagnostic hold 模式
 ```
 
-LOG-0 最小 ramdisk 重包候选：
+先用仓库内离线审计脚本检查候选镜像。检查失败时不要上机 boot：
 
-```text
-artifacts/experiments/log0-ramdisk-repack-baseline/out/lineage-mininitramfs-boot-log0-repack.img
-sha256: 0a2b49834b8d7a6f13c20cb13b33b3d425facedeb87657ee755440e0ce2388bd
+```bash
+./scripts/audit_alioth_boot_image.py \
+  artifacts/control/lineage-mininitramfs-boot.img \
+  artifacts/experiments/<candidate>/lineage-mininitramfs-boot-*.img
 ```
 
-LOG-0 只做：
+已确认的坏候选特征：
 
 ```text
-基于原始 control image 解包/重包 ramdisk
-只添加 /etc/alioth-log0-marker
-不改 init mode
-不改 switchroot
-不改 cmdline
+LOG-0 / exp2 / exp2b 的 ramdisk 解压后以 00070701 开头，不是预期的 newc 070701/070702。
+这类候选必须视为 ramdisk 重构失败，不能作为 Ubuntu/systemd 故障证据。
 ```
 
-LOG-0 目标：
+修正版最小重包候选：
 
 ```text
-验证当前本机 ramdisk 重包流程是否仍能启动到原 Arch/control 路径。
-如果 LOG-0 也进 recovery，说明重包流程本身有问题，不能继续基于该流程做 Ubuntu/systemd 候选。
+artifacts/experiments/log0b-newc-marker/lineage-mininitramfs-boot-log0b-newc-marker.img
+sha256: e973f2119bd1b5ea8ff8d62243cbc5d84c2fadf88c91f1d2d5136cea5f875b6c
+change: only append etc/alioth-log0b-newc-marker
+audit: passes Android boot v3 + gzip + newc cpio checks
+result: fastboot boot 已验证可以回到 Arch/control 路径；重包流程本身成立
+```
+
+LOG-0b 后续只读 dmesg 已确认 Ubuntu path fallback 的直接原因：
+
+```text
+/dev/block/by-name/userdata 按 ext4 挂载到 /mnt/data 失败：Invalid argument
+随后 initramfs 走 Arch fallback，挂载 /dev/block/by-name/arch 到 /mnt/arch
+当前 Ubuntu rootfs 实际在 Arch root 的 /data/rootfs/ubuntu-24.04
+```
+
+EXP3 候选：
+
+```text
+artifacts/experiments/exp3-ubuntu-arch-rootfs-valid-newc/lineage-mininitramfs-boot-exp3-ubuntu-arch-rootfs.img
+sha256: 261114e0f718df866326a034b5bfbc54f1e78ed07ad57365ca6d54cea5c11ffd
+ramdisk sha256: acdc819b0f0c3dc7211e9f590373baeeaff3f237b47c16b4a1acbae54d88aeb2
+change: 先试原 userdata rootfs；失败时挂载 Arch 并 bind /mnt/arch/data/rootfs/ubuntu-24.04 到 /mnt/ubuntu
+audit: passes Android boot v3 + gzip + newc cpio checks; marker etc/alioth-exp3-arch-ubuntu-rootfs
+result: fastboot boot 已验证进入 Ubuntu 24.04.4 LTS，PID1=systemd，root=/dev/block/by-name/arch[/data/rootfs/ubuntu-24.04]
+```
+
+EXP3 后续问题：
+
+```text
+systemctl is-system-running=degraded；失败单元是 alioth-wifi-prepare.service。
+SSH 端口已起，但 /root/.ssh/authorized_keys 被 initramfs 嵌入 key redmik40-alioth-usb 覆盖；
+当前 Mac 使用的是 alioth-usb-mac，所以 SSH 公钥认证失败。未获明确许可前不要直接改手机 rootfs 配置。
+如果继续验证，先用 2323；需要 SSH 时再明确生成/boot 会写入目标 key 的修正版候选。
 ```
 
 本机 Docker kernel 编译准备见：

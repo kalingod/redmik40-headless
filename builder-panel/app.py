@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import subprocess
+import tarfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -118,7 +119,39 @@ def row_to_dict(row):
         except json.JSONDecodeError:
             data["command"] = data["command_json"]
     data.pop("command_json", None)
+    enrich_task(data)
     return data
+
+
+def branch_token(branch):
+    return str(branch or "").replace("/", "_")
+
+
+def task_artifact_name(task):
+    if not task or task.get("kind") != "build":
+        return None
+    if task.get("artifact_dir"):
+        return Path(task["artifact_dir"]).name
+    if task.get("id") and task.get("branch"):
+        return f"panel-{branch_token(task['branch'])}-{task['id']}"
+    return None
+
+
+def artifact_bundle_url(name):
+    if not name or not SAFE_NAME_RE.fullmatch(name):
+        return None
+    if not (ARTIFACT_ROOT / name).is_dir():
+        return None
+    return f"/download-bundle/{quote(name)}.tar.gz"
+
+
+def enrich_task(task):
+    name = task_artifact_name(task)
+    if not name:
+        return task
+    task["artifact_name"] = name
+    task["artifact_bundle_url"] = artifact_bundle_url(name)
+    return task
 
 
 def validate_project(project):
@@ -217,6 +250,13 @@ def build_kernel(task_id, project, branch, jobs, sync_first, systemd_config, cle
     cfg = PROJECTS[project]
     if sync_first:
         sync_repo(task_id, project, branch)
+    else:
+        current = quick_cmd(["git", "branch", "--show-current"], cfg["kernel_dir"])
+        current_branch = current["output"] if current["ok"] else ""
+        if current_branch != branch:
+            raise RuntimeError(
+                f"checkout is on {current_branch or 'detached HEAD'}; use Sync then build for {branch}"
+            )
 
     artifact_name = f"panel-{branch.replace('/', '_')}-{task_id}"
     artifact_dir = cfg["artifact_root"] / artifact_name
@@ -349,12 +389,35 @@ def tail_file(path, limit=65536):
     return data.decode("utf-8", errors="replace")
 
 
-def list_artifacts():
+def known_branches():
+    branches = set(list_git_branches(KERNEL_DIR))
+    if DEFAULT_BRANCH:
+        branches.add(DEFAULT_BRANCH)
+
+    current = quick_cmd(["git", "branch", "--show-current"], KERNEL_DIR)
+    if current["ok"] and current["output"]:
+        branches.add(current["output"])
+
+    with connect_db() as conn:
+        rows = conn.execute("SELECT DISTINCT branch FROM tasks WHERE branch IS NOT NULL").fetchall()
+    for row in rows:
+        if row["branch"]:
+            branches.add(row["branch"])
+    return branches
+
+
+def list_artifacts(branch=None, branches=None):
     items = []
     if not ARTIFACT_ROOT.exists():
         return items
+    branches = set(branches or known_branches())
+    if branch:
+        branches.add(branch)
     for directory in sorted(ARTIFACT_ROOT.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
         if not directory.is_dir() or not SAFE_NAME_RE.fullmatch(directory.name):
+            continue
+        item_branch = artifact_branch(directory.name, branches)
+        if branch and item_branch != branch:
             continue
         files = []
         for path in sorted(directory.iterdir()):
@@ -370,11 +433,30 @@ def list_artifacts():
         items.append(
             {
                 "name": directory.name,
+                "branch": item_branch,
                 "mtime": int(directory.stat().st_mtime),
+                "updated_at": datetime.fromtimestamp(
+                    directory.stat().st_mtime, timezone.utc
+                ).isoformat(timespec="seconds"),
+                "bundle_url": artifact_bundle_url(directory.name),
                 "files": files,
             }
         )
     return items[:30]
+
+
+def list_tasks(branch=None, limit=25):
+    limit = max(1, min(int(limit), 200))
+    query = "SELECT * FROM tasks"
+    params = []
+    if branch:
+        query += " WHERE branch=?"
+        params.append(branch)
+    query += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    with connect_db() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [row_to_dict(row) for row in rows]
 
 
 def directory_size_label(path):
@@ -401,6 +483,121 @@ def latest_task_snapshot():
     with connect_db() as conn:
         row = conn.execute("SELECT * FROM tasks ORDER BY id DESC LIMIT 1").fetchone()
     return row_to_dict(row)
+
+
+def task_counts():
+    with connect_db() as conn:
+        rows = conn.execute("SELECT status, COUNT(*) AS count FROM tasks GROUP BY status").fetchall()
+    return {row["status"]: row["count"] for row in rows}
+
+
+def artifact_count():
+    if not ARTIFACT_ROOT.exists():
+        return 0
+    return sum(
+        1
+        for path in ARTIFACT_ROOT.iterdir()
+        if path.is_dir() and SAFE_NAME_RE.fullmatch(path.name)
+    )
+
+
+def disk_summary(path):
+    result = quick_cmd(["df", "-h", str(path)], PROJECT_DIR, timeout=10)
+    if not result["ok"]:
+        return None
+    lines = result["output"].splitlines()
+    if len(lines) < 2:
+        return None
+    parts = lines[-1].split()
+    if len(parts) < 5:
+        return None
+    return {
+        "filesystem": parts[0],
+        "size": parts[1],
+        "used": parts[2],
+        "available": parts[3],
+        "used_percent": parts[4],
+        "mount": parts[-1],
+    }
+
+
+def list_git_branches(repo):
+    result = quick_cmd(
+        ["git", "for-each-ref", "--format=%(refname:short)", "refs/heads", "refs/remotes/origin"],
+        repo,
+        timeout=10,
+    )
+    if not result["ok"]:
+        return []
+    seen = set()
+    branches = []
+    for line in result["output"].splitlines():
+        name = line.strip()
+        if not name or name == "origin/HEAD":
+            continue
+        if name.startswith("origin/"):
+            name = name[len("origin/") :]
+        if name in seen:
+            continue
+        seen.add(name)
+        branches.append(name)
+    return sorted(branches)[:120]
+
+
+def artifact_branch(name, branches):
+    if not name.startswith("panel-"):
+        return None
+    for branch in sorted(branches, key=lambda item: len(branch_token(item)), reverse=True):
+        prefix = f"panel-{branch_token(branch)}-"
+        if not name.startswith(prefix):
+            continue
+        suffix = name[len(prefix) :]
+        if suffix.isdigit():
+            return branch
+    return None
+
+
+def list_pipelines():
+    current = quick_cmd(["git", "branch", "--show-current"], KERNEL_DIR)
+    current_branch = current["output"] if current["ok"] else None
+    branches = known_branches()
+
+    with connect_db() as conn:
+        rows = conn.execute("SELECT * FROM tasks WHERE kind='build' ORDER BY id DESC").fetchall()
+    tasks = [row_to_dict(row) for row in rows]
+
+    artifacts = list_artifacts(branches=branches)
+    artifacts_by_branch = {branch: [] for branch in branches}
+    for artifact in artifacts:
+        branch = artifact.get("branch")
+        if branch:
+            artifacts_by_branch.setdefault(branch, []).append(artifact)
+    pipelines = []
+    for branch in sorted(branches):
+        branch_tasks = [task for task in tasks if task.get("branch") == branch]
+        latest_task = branch_tasks[0] if branch_tasks else None
+        latest_success = next((task for task in branch_tasks if task.get("status") == "success"), None)
+        branch_artifacts = artifacts_by_branch.get(branch, [])
+        latest_artifact = branch_artifacts[0] if branch_artifacts else None
+        download_name = None
+        if latest_success and latest_success.get("artifact_bundle_url"):
+            download_name = latest_success.get("artifact_name")
+        elif latest_artifact and latest_artifact.get("bundle_url"):
+            download_name = latest_artifact.get("name")
+        pipelines.append(
+            {
+                "branch": branch,
+                "current": branch == current_branch,
+                "default": branch == DEFAULT_BRANCH,
+                "latest_task": latest_task,
+                "latest_success": latest_success,
+                "latest_artifact": latest_artifact,
+                "download_artifact": download_name,
+                "download_url": artifact_bundle_url(download_name),
+                "artifact_count": len(branch_artifacts),
+            }
+        )
+    return pipelines
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -449,14 +646,31 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/status":
                 return self.api_status()
             if parsed.path == "/api/tasks":
-                return self.api_tasks()
+                return self.api_tasks(parsed)
             if parsed.path.startswith("/api/tasks/"):
                 task_id = int(parsed.path.rsplit("/", 1)[1])
                 return self.api_task(task_id)
+            if parsed.path == "/api/pipelines":
+                return self.send_json(200, {"pipelines": list_pipelines()})
             if parsed.path == "/api/artifacts":
-                return self.send_json(200, {"artifacts": list_artifacts()})
+                return self.api_artifacts(parsed)
+            if parsed.path.startswith("/download-bundle/"):
+                return self.serve_bundle(parsed.path)
             if parsed.path.startswith("/download/"):
                 return self.serve_download(parsed.path)
+            self.send_error(404)
+        except Exception as exc:
+            self.send_json(500, {"error": str(exc)})
+
+    def do_HEAD(self):
+        if not self.require_auth():
+            return
+        parsed = urlparse(self.path)
+        try:
+            if parsed.path.startswith("/download-bundle/"):
+                return self.serve_bundle(parsed.path, body=False)
+            if parsed.path.startswith("/download/"):
+                return self.serve_download(parsed.path, body=False)
             self.send_error(404)
         except Exception as exc:
             self.send_json(500, {"error": str(exc)})
@@ -508,6 +722,7 @@ class Handler(BaseHTTPRequestHandler):
         panel_out = PROJECTS["lineage-sm8250-alioth"]["out_dir"]
         latest_task = latest_task_snapshot()
         build_processes = quick_cmd(["pgrep", "-c", "-f", "clang|ld.lld|make -C /work/kernel"], PROJECT_DIR)
+        dirty_files = dirty["output"].splitlines() if dirty["ok"] and dirty["output"] else []
         self.send_json(
             200,
             {
@@ -520,8 +735,10 @@ class Handler(BaseHTTPRequestHandler):
                 "default_branch": DEFAULT_BRANCH,
                 "default_jobs": DEFAULT_JOBS,
                 "branch": branch["output"] if branch["ok"] else None,
+                "branches": sorted(known_branches()),
                 "head": head["output"] if head["ok"] else None,
-                "dirty_count": len(dirty["output"].splitlines()) if dirty["ok"] and dirty["output"] else 0,
+                "dirty_count": len(dirty_files),
+                "dirty_files": dirty_files[:12],
                 "builder_image": image["output"] if image["ok"] else None,
                 "active_task": active,
                 "loadavg": list(os.getloadavg()),
@@ -530,15 +747,29 @@ class Handler(BaseHTTPRequestHandler):
                 "out_dir": str(panel_out),
                 "out_size": directory_size_label(panel_out),
                 "object_count": count_suffix_files(panel_out, ".o"),
+                "task_counts": task_counts(),
+                "artifact_count": artifact_count(),
+                "disk": disk_summary(BASE_DIR),
+                "pipelines": list_pipelines(),
                 "latest_task": latest_task,
                 "projects": [{"id": key, "label": cfg["label"]} for key, cfg in PROJECTS.items()],
             },
         )
 
-    def api_tasks(self):
-        with connect_db() as conn:
-            rows = conn.execute("SELECT * FROM tasks ORDER BY id DESC LIMIT 25").fetchall()
-        self.send_json(200, {"tasks": [row_to_dict(row) for row in rows]})
+    def api_tasks(self, parsed):
+        query = parse_qs(parsed.query)
+        branch = query.get("branch", [None])[0]
+        if branch:
+            branch = validate_branch(branch)
+        limit = int(query.get("limit", [25])[0])
+        self.send_json(200, {"tasks": list_tasks(branch=branch, limit=limit)})
+
+    def api_artifacts(self, parsed):
+        query = parse_qs(parsed.query)
+        branch = query.get("branch", [None])[0]
+        if branch:
+            branch = validate_branch(branch)
+        self.send_json(200, {"artifacts": list_artifacts(branch=branch)})
 
     def api_task(self, task_id):
         with connect_db() as conn:
@@ -549,7 +780,7 @@ class Handler(BaseHTTPRequestHandler):
         task["log_tail"] = tail_file(task["log_path"])
         self.send_json(200, {"task": task})
 
-    def serve_download(self, path):
+    def serve_download(self, path, body=True):
         parts = path.split("/")
         if len(parts) != 4:
             return self.send_error(404)
@@ -565,12 +796,33 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(data_size))
         self.send_header("Content-Disposition", f'attachment; filename="{target.name}"')
         self.end_headers()
+        if not body:
+            return
         with target.open("rb") as fh:
             while True:
                 chunk = fh.read(1024 * 1024)
                 if not chunk:
                     break
                 self.wfile.write(chunk)
+
+    def serve_bundle(self, path, body=True):
+        name = unquote(path.rsplit("/", 1)[-1])
+        if name.endswith(".tar.gz"):
+            name = name[:-7]
+        artifact = validate_safe_name(name, "artifact")
+        target = ARTIFACT_ROOT / artifact
+        if not target.is_dir():
+            return self.send_error(404)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/gzip")
+        self.send_header("Content-Disposition", f'attachment; filename="{artifact}.tar.gz"')
+        self.end_headers()
+        if not body:
+            return
+        with tarfile.open(fileobj=self.wfile, mode="w|gz") as tar:
+            for item in sorted(target.iterdir()):
+                if item.is_file() and SAFE_NAME_RE.fullmatch(item.name):
+                    tar.add(item, arcname=f"{artifact}/{item.name}")
 
 
 def main():

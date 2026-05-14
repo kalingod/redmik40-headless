@@ -5,10 +5,17 @@ case "$0" in
 esac
 
 cpu="$helper/alioth-status-ui-cpu"
+[ -x "$cpu" ] || cpu=/var/tmp/alioth-switchroot/alioth-status-ui-cpu
 [ -x "$cpu" ] || cpu=/bin/alioth-status-ui-cpu
 
 gpu=/data/experiments/alioth_gpu_monitor_service
+[ -x "$gpu" ] || gpu=/data/experiments/gpu-runtime-20260513/alioth_gpu_monitor_service
+
 icd=/data/experiments/freedreno_icd-kgsl-mesa2034-builddir.json
+[ -r "$icd" ] || icd=/data/experiments/gpu-runtime-20260513/freedreno_icd-kgsl-mesa2034-aarch64.json
+
+runtime_lib=/data/experiments/gpu-runtime-20260513/lib
+turnip_lib=/data/experiments/mesa-kgsl-prefix/lib/aarch64-linux-gnu
 vert=/data/experiments/alioth_vulkan_glyph_text.vert.spv
 frag=/data/experiments/alioth_vulkan_glyph_text.frag.spv
 log=/run/alioth-status-ui-wrapper.log
@@ -60,6 +67,7 @@ start_cpu() {
 if [ -x "$gpu" ] && [ -r "$icd" ] && [ -r "$vert" ] && [ -r "$frag" ] &&
    ensure_gpu_nodes; then
   say "starting GPU monitor service: $gpu"
+  export LD_LIBRARY_PATH="$runtime_lib:$turnip_lib:${LD_LIBRARY_PATH:-}"
   export VK_ICD_FILENAMES="$icd"
   export TU_DEBUG=startup
   "$gpu" monitor "$vert" "$frag" &

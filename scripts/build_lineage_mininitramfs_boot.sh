@@ -34,6 +34,7 @@ DEFAULT_WIFI_PSK="${DEFAULT_WIFI_PSK:-${ALIOTH_WIFI_PSK:-}}"
 DEFAULT_WIFI_CONFIG="${DEFAULT_WIFI_CONFIG:-}"
 WIFI_PREPARE_HELPER_FILE="${WIFI_PREPARE_HELPER_FILE:-$REPO_DIR/scripts/alioth_wifi_prepare.sh}"
 WIFI_BRINGUP_HELPER_FILE="${WIFI_BRINGUP_HELPER_FILE:-$REPO_DIR/scripts/alioth_wifi_bringup.sh}"
+WIFI_SCAN_HELPER_FILE="${WIFI_SCAN_HELPER_FILE:-$REPO_DIR/scripts/alioth_wifi_scan.sh}"
 WIFI_CONNECT_HELPER_FILE="${WIFI_CONNECT_HELPER_FILE:-$REPO_DIR/scripts/alioth_wifi_connect.sh}"
 WIFI_STATUS_HELPER_FILE="${WIFI_STATUS_HELPER_FILE:-$REPO_DIR/scripts/alioth_wifi_status.sh}"
 ANDROID_DAEMON_HELPER_FILE="${ANDROID_DAEMON_HELPER_FILE:-$REPO_DIR/scripts/alioth_android_daemon.sh}"
@@ -1846,6 +1847,7 @@ stage_ubuntu_wifi_files() {
   overlay=/etc/alioth-rootfs-overlay
   stage_ubuntu_file "$overlay/usr/local/sbin/alioth-wifi-prepare" /mnt/ubuntu/usr/local/sbin/alioth-wifi-prepare 0755
   stage_ubuntu_file "$overlay/usr/local/sbin/alioth-wifi-bringup" /mnt/ubuntu/usr/local/sbin/alioth-wifi-bringup 0755
+  stage_ubuntu_file "$overlay/usr/local/sbin/alioth-wifi-scan" /mnt/ubuntu/usr/local/sbin/alioth-wifi-scan 0755
   stage_ubuntu_file "$overlay/usr/local/sbin/alioth-wifi-connect" /mnt/ubuntu/usr/local/sbin/alioth-wifi-connect 0755
   stage_ubuntu_file "$overlay/usr/local/sbin/alioth-wifi-status" /mnt/ubuntu/usr/local/sbin/alioth-wifi-status 0755
   stage_ubuntu_file "$overlay/usr/local/sbin/alioth-android-daemon" /mnt/ubuntu/usr/local/sbin/alioth-android-daemon 0755
@@ -2524,6 +2526,7 @@ build() {
   mkdir -p "$overlay/usr/local/sbin" "$overlay/etc/systemd/system"
   require_file "$WIFI_PREPARE_HELPER_FILE"
   require_file "$WIFI_BRINGUP_HELPER_FILE"
+  require_file "$WIFI_SCAN_HELPER_FILE"
   require_file "$WIFI_CONNECT_HELPER_FILE"
   require_file "$WIFI_STATUS_HELPER_FILE"
   require_file "$ANDROID_DAEMON_HELPER_FILE"
@@ -2534,11 +2537,13 @@ build() {
   require_file "$WIFI_CONNECT_UNIT_FILE"
   cp "$WIFI_PREPARE_HELPER_FILE" "$overlay/usr/local/sbin/alioth-wifi-prepare"
   cp "$WIFI_BRINGUP_HELPER_FILE" "$overlay/usr/local/sbin/alioth-wifi-bringup"
+  cp "$WIFI_SCAN_HELPER_FILE" "$overlay/usr/local/sbin/alioth-wifi-scan"
   cp "$WIFI_CONNECT_HELPER_FILE" "$overlay/usr/local/sbin/alioth-wifi-connect"
   cp "$WIFI_STATUS_HELPER_FILE" "$overlay/usr/local/sbin/alioth-wifi-status"
   cp "$ANDROID_DAEMON_HELPER_FILE" "$overlay/usr/local/sbin/alioth-android-daemon"
   chmod 0755 "$overlay/usr/local/sbin/alioth-wifi-prepare" \
     "$overlay/usr/local/sbin/alioth-wifi-bringup" \
+    "$overlay/usr/local/sbin/alioth-wifi-scan" \
     "$overlay/usr/local/sbin/alioth-wifi-connect" \
     "$overlay/usr/local/sbin/alioth-wifi-status" \
     "$overlay/usr/local/sbin/alioth-android-daemon"
